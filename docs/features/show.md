@@ -10,6 +10,7 @@ git shiplog show [--json|--json-compact|--jsonl] [--boring] [COMMIT|REF]
 
 ## Behavior
 - Default target: latest entry at the environment journal ref (`refs/_shiplog/journal/<ENV>`). ENV resolves from `--env`, then `SHIPLOG_ENV`, or `prod`.
+- Flags may appear before or after the target (`git shiplog show <sha> --json`). At most one target is accepted and unknown flags are errors.
 - `--json`: print only the JSON trailer of the entry (pretty if `jq` is present; raw otherwise).
 - `--json-compact`/`--jsonl`: print a single compact JSON line.
 - `--boring`: disable Bosun UI rendering and print plain text.

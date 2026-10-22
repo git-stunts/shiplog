@@ -18,6 +18,8 @@ SHIPLOG_BORING=1 git shiplog --yes write prod --service release --reason "MVP re
 Tip (non‑interactive/CI): avoid prompts by passing required fields via flags or env and using `--boring --yes` when appropriate.
 
 ## Behavior
+- Resolves the journal environment as positional `ENV` > `--env` > `SHIPLOG_ENV` > `prod`, accepts at most one positional, and rejects names that fail `git check-ref-format --allow-onelevel`, contain whitespace or `..`, or start with `-`.
+- Rejects unknown flags (`unknown write option: --log`) instead of ignoring them, so a typo can never promote the next word to an environment and create a stray journal.
 - Validates the author against the resolved allowlist and performs a signing precheck when signatures are required.
 - Prompts for service, status, change details, and artifact information. You can prefill or bypass prompts with flags (`--service`, `--reason`, etc.) or environment variables listed below.
 - Defaults the namespace to the journal environment when left blank (e.g., `prod`).
