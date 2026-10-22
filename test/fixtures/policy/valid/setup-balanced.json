@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "require_signed": false,
+  "authors": {
+    "default_allowlist": [
+      "shiplog-tester@example.com",
+      "ops@example.com"
+    ],
+    "env_overrides": {
+      "default": []
+    }
+  }
+}

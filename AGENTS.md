@@ -14,7 +14,7 @@ How to run tests safely (Dockerized):
 ## Test Timeouts
 
 - The suite no longer enforces a timeout by default. Runs will continue until completion unless you opt in.
-- To enable a guard in any environment, set `TEST_TIMEOUT_SECS` to a positive integer (e.g., `TEST_TIMEOUT_SECS=180 make test`).
+- To enable a guard in any environment, set `TEST_TIMEOUT_SECS` to a positive integer (e.g., `TEST_TIMEOUT_SECS=180 make test`). `make test` forwards `TEST_TIMEOUT_SECS`, `SHIPLOG_USE_LOCAL_SANDBOX` and `BATS_FLAGS` into the container; `test.sh` (ci-matrix) and the Dockerfile entrypoint share the same no-timeout default.
 - You can still wrap the outer `make test` call with `timeout`/`gtimeout` if you suspect a hang.
 - In CI, rely on the job/step timeout or export `TEST_TIMEOUT_SECS` for an additional safety net.
 - If a timeout occurs, capture and attach logs from `ci-logs/*` or the container output for debugging.
