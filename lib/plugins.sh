@@ -14,6 +14,30 @@ shiplog_plugins_stage_dir() {
   printf '%s/%s.d' "$base" "$stage"
 }
 
+# shiplog_plugins_canonical_file PATH
+# Follows symlinks (bounded) and prints the physical path of the regular file
+# PATH resolves to; fails when it is not a regular file. Stock tools only:
+# `readlink` without -f is enough because the loop does the walking.
+shiplog_plugins_canonical_file() {
+  local path="$1" hops=0 target dir
+  while [ -L "$path" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 1
+    target=$(readlink "$path") || return 1
+    case "$target" in
+      /*) path="$target" ;;
+      *) path="$(dirname "$path")/$target" ;;
+    esac
+  done
+  [ -f "$path" ] || return 1
+  dir=$(cd "$(dirname "$path")" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s' "$dir" "$(basename "$path")"
+}
+
+# Discovery rule (docs/plugins.md): every entry of the stage directory that is
+# an executable regular file, or a symlink to one, runs. Any name counts; the
+# resolved file must live inside the plugins directory. Entries run in
+# lexicographic order of their names.
 shiplog_plugins_list() {
   local stage="$1"
   local dir
@@ -23,11 +47,13 @@ shiplog_plugins_list() {
   local plugins_root
   plugins_root=$(cd "$(shiplog_plugins_dir)" 2>/dev/null && pwd -P) || return 1
 
-  find "$dir" -maxdepth 1 -type f -perm -u+x -name '*.sh' 2>/dev/null | sort | while IFS= read -r plugin; do
+  find "$dir" -maxdepth 1 -mindepth 1 \( -type f -o -type l \) 2>/dev/null | sort | while IFS= read -r plugin; do
     local canonical
-    canonical=$(cd "$(dirname "$plugin")" 2>/dev/null && pwd -P)
-    if [ -z "$canonical" ]; then
-      printf 'shiplog: failed to resolve canonical path for %s\n' "$plugin" >&2
+    if ! canonical=$(shiplog_plugins_canonical_file "$plugin"); then
+      printf 'shiplog: ignoring plugin %s: not a regular file\n' "$plugin" >&2
+      continue
+    fi
+    if [ ! -x "$canonical" ]; then
       continue
     fi
     case "$canonical/" in
@@ -35,10 +61,19 @@ shiplog_plugins_list() {
         printf '%s\n' "$plugin"
         ;;
       *)
-        printf 'shiplog: ignoring plugin outside plugins dir: %s\n' "$plugin" >&2
+        printf 'shiplog: ignoring plugin outside plugins dir: %s -> %s\n' "$plugin" "$canonical" >&2
         ;;
     esac
   done
+}
+
+# shiplog_plugins_trailer_intact MESSAGE
+# True when MESSAGE still carries a parseable JSON-object trailer.
+shiplog_plugins_trailer_intact() {
+  local message="$1" json
+  json=$(printf '%s\n' "$message" | shiplog_extract_trailer)
+  [ -n "$json" ] || return 1
+  printf '%s\n' "$json" | jq -e 'type == "object"' >/dev/null 2>&1
 }
 
 shiplog_plugins_filter() {
@@ -47,10 +82,18 @@ shiplog_plugins_filter() {
   local plugin
   while IFS= read -r plugin; do
     [ -n "$plugin" ] || continue
-    tmp_output=$(printf '%s' "$tmp_output" | "$plugin" "$stage") || {
+    # Here-string rather than a pipe: a plugin that exits without reading its
+    # input must not turn into a SIGPIPE failure under pipefail.
+    tmp_output=$("$plugin" "$stage" <<<"$tmp_output") || {
       printf 'shiplog: plugin %s failed during stage %s\n' "$plugin" "$stage" >&2
       return 1
     }
+    # A plugin that exits 0 with empty or mangled output must not erase the
+    # structured trailer (SLT.BUG.LIB.009).
+    if ! shiplog_plugins_trailer_intact "$tmp_output"; then
+      printf 'shiplog: plugin %s removed the structured trailer during stage %s\n' "$(basename "$plugin")" "$stage" >&2
+      return 1
+    fi
   done < <(shiplog_plugins_list "$stage")
   printf '%s' "$tmp_output"
 }
