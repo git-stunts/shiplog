@@ -1552,7 +1552,16 @@ cmd_refs() {
       if [ ! -x "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" ]; then
         die "migration helper missing: $SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh"
       fi
-      "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" "$@"
+      # The global flag parser consumes --dry-run before it reaches us; forward
+      # an explicit dry-run so the helper previews instead of migrating.
+      local -a migrate_args=("$@")
+      if [ "${SHIPLOG_DRY_RUN_EXPLICIT:-0}" = "1" ]; then
+        case "${SHIPLOG_DRY_RUN:-0}" in
+          0|false|no|off|'') ;;
+          *) migrate_args+=(--dry-run) ;;
+        esac
+      fi
+      "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" ${migrate_args[@]+"${migrate_args[@]}"}
       ;;
     *) die "Unknown refs subcommand: ${sub:-<none>}" ;;
   esac
