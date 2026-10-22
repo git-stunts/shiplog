@@ -136,7 +136,8 @@ jobs:
               echo "No lintable changed Markdown files after filtering; skipping."
               exit 0
             fi
-            printf 'Linting files:%s\n' "\n${filtered[*]}"
+            printf 'Linting files:\n'
+            printf '  %s\n' "${filtered[@]}"
             markdownlint "${filtered[@]}"
           else
             # On push (e.g., main), lint the Markdown files changed by the push.

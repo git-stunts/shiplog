@@ -1,5 +1,6 @@
 # 🚢🪵 Shiplog — Git‑Native Deployment Ledger
 
+<!-- markdownlint-disable-next-line MD033 -->
 <img alt="shiplog" src="https://github.com/user-attachments/assets/3c4d88fd-f46e-46f2-83ee-cc761ffdf9ef" height="500" align="right" />
 
 Remember that 2 AM incident where no one knew which version was deployed or who changed the config? _(We've ruled out Jenkins... For now.)_
@@ -37,7 +38,7 @@ A built-in **allow list enforces policy at the source**: only trusted contributo
 
 ## Quick Start
 
-### 1. Install once on your workstation or CI runner.
+### 1. Install once on your workstation or CI runner
 
 ```bash
 # Clone and set up the environment
@@ -98,7 +99,7 @@ Shiplog uses stock POSIX tooling. Ensure the following minimum versions are avai
 |------|-----------------|----------------|
 | `git` | 2.35+ | Leans on modern refspec handling and `git ls-remote`/`update-ref`. |
 | `bash` | 5.0+ | All helper scripts target `bash` (strict mode, mapfile, heredocs). |
-| `jq` | 1.7+ | Policy validation and structured output. | 
+| `jq` | 1.7+ | Policy validation and structured output. |
 | `ssh-keygen` | OpenSSH 8.2+ | Required for attestation mode (`ssh-keygen -Y verify`). |
 
 > [!tip]  
@@ -165,6 +166,7 @@ Choose how maintainer approval is expressed. Both are supported.
 |-----------|----------------------|-------------|
 | GitHub.com (SaaS) | Use Branch/Push Rulesets + Required Status Checks. | SaaS does not run custom server hooks. Prefer a branch namespace (`refs/heads/_shiplog/**`) so rules apply. |
 | Self-hosted (GH Enterprise, GitLab, Gitea) | Install the pre-receive hook (`contrib/hooks/pre-receive.shiplog`) to enforce policy/trust server-side. | The default ref namespace (refs/_shiplog/**) is fine. Switching namespaces is supported via `scripts/shiplog-migrate-ref-root.sh` and `git config shiplog.refRoot`. |
+
 ---
 
 ## What’s Live vs Roadmap
@@ -202,8 +204,8 @@ Choose how maintainer approval is expressed. Both are supported.
 | Question | Answer |
 |----------|--------|
 | What is AJV and why does CI mention it? | AJV is a fast JSON Schema validator for Node.js. CI uses it to validate `examples/policy.json`, the fixtures under `test/fixtures/policy/valid/`, and `.shiplog/policy.json` when present against `examples/policy.schema.json`, and asserts that the fixtures under `test/fixtures/policy/invalid/` are rejected. Locally, `git shiplog policy validate` performs `jq` checks. |
-|Can Shiplog enforce policy on GitHub.com (SaaS)? | Yes, but via **Branch/Push Rulesets + Required Checks** and a branch namespace for Shiplog refs, as SaaS doesn't run custom server hooks. | 
-| Which trust mode should I use? | **Chain** if maintainers can sign commits; **attestation** if signatures come from automation/SSH. Both are fully supported. | 
+|Can Shiplog enforce policy on GitHub.com (SaaS)? | Yes, but via **Branch/Push Rulesets + Required Checks** and a branch namespace for Shiplog refs, as SaaS doesn't run custom server hooks. |
+| Which trust mode should I use? | **Chain** if maintainers can sign commits; **attestation** if signatures come from automation/SSH. Both are fully supported. |
 
 ## License
 
