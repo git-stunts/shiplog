@@ -6,29 +6,31 @@ setup() {
   shiplog_install_cli
   shiplog_use_sandbox_repo
   git shiplog init >/dev/null
+
+  # Fake install that passes the uninstaller's checkout check: bin/git-shiplog
+  # plus remote.origin.url pointing at the Shiplog repo.
   mkdir -p "$HOME/.shiplog/bin" "$HOME/.shiplog/scripts"
   cat <<'SCRIPT' > "$HOME/.shiplog/bin/git-shiplog"
 #!/usr/bin/env bash
 exit 0
 SCRIPT
   chmod +x "$HOME/.shiplog/bin/git-shiplog"
-  install -m 0755 "$HOME/.shiplog/bin/git-shiplog" /usr/local/bin/git-shiplog || skip "Cannot install to /usr/local/bin - insufficient permissions"
-  install -m 0755 "$HOME/.shiplog/bin/git-shiplog" /usr/local/bin/shiplog || skip "Cannot install to /usr/local/bin - insufficient permissions"
+  git -C "$HOME/.shiplog" init -q
+  git -C "$HOME/.shiplog" remote add origin https://github.com/flyingrobots/shiplog.git
 
   cat <<'BOSUN' > "$HOME/.shiplog/scripts/bosun"
 #!/usr/bin/env bash
 exit 0
 BOSUN
   chmod +x "$HOME/.shiplog/scripts/bosun"
-  if [[ -w /usr/local/bin ]]; then
-    ln -sf "$HOME/.shiplog/scripts/bosun" /usr/local/bin/bosun
-  fi
 
-  # Store original config for restoration
-  # Only mess with git config if we're actually in a git repo
-  if ! git rev-parse --git-dir >/dev/null 2>&1; then
-    skip "Not in a git repository"
-  fi
+  # Shims live in a test-owned bin dir on PATH, so the harness copy of
+  # git-shiplog in /usr/local/bin is never overwritten or removed (#148 C).
+  SHIM_BIN="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$SHIM_BIN"
+  install -m 0755 "$HOME/.shiplog/bin/git-shiplog" "$SHIM_BIN/shiplog"
+  ln -sf "$HOME/.shiplog/scripts/bosun" "$SHIM_BIN/bosun"
+  export PATH="$SHIM_BIN:$PATH"
 
   # Store original config for restoration
   ORIGINAL_FETCH=$(git config --get-all remote.origin.fetch 2>/dev/null || echo "")
@@ -67,10 +69,6 @@ teardown() {
 
   shiplog_cleanup_sandbox_repo
   rm -rf "$HOME/.shiplog" "$HOME/.test_profile" "$HOME/.test_profile.shiplog.bak" 2>/dev/null || true
-
-  if [[ -w /usr/local/bin ]]; then
-    rm -f /usr/local/bin/git-shiplog /usr/local/bin/shiplog /usr/local/bin/bosun
-  fi
 }
 
 @test "uninstall removes shiplog artifacts" {
@@ -80,12 +78,10 @@ teardown() {
   [ "$status" -eq 0 ]
 
   [ ! -d "$HOME/.shiplog" ]
-  # Only test global binary removal if we actually installed them
-  if [ "$GLOBAL_INSTALL" = "true" ]; then
-  [ ! -e /usr/local/bin/git-shiplog ]
-  [ ! -e /usr/local/bin/shiplog ]
-  [ ! -e /usr/local/bin/bosun ]
-  fi
+  [ ! -e "$SHIM_BIN/shiplog" ]
+  [ ! -e "$SHIM_BIN/bosun" ]
+  # The harness copy is not a Shiplog shim and must survive.
+  [ -e /usr/local/bin/git-shiplog ]
 
   local fetch_config
   fetch_config=$(git config --get-all remote.origin.fetch 2>/dev/null || echo "")
