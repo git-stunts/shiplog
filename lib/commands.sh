@@ -319,7 +319,7 @@ EOF
   require_allowed_signer
 
   local journal_ref="$(ref_journal "$env")"
-  local notes_ref="$NOTES_REF"
+  local notes_ref; notes_ref=$(shiplog_notes_ref)
   local trust_ref="${TRUST_REF:-$TRUST_REF_DEFAULT}"
   local remote
   remote=$(shiplog_remote_name)
@@ -338,7 +338,7 @@ EOF
   local trust_oid
   trust_oid=$(git rev-parse -q --verify "$trust_ref" 2>/dev/null || true)
   if [ -z "$trust_oid" ]; then
-    die "shiplog: trust ref $trust_ref not found. Fetch it (git fetch $remote '+refs/_shiplog/trust/*:refs/_shiplog/trust/*') and run ./scripts/shiplog-trust-sync.sh"
+    die "shiplog: trust ref $trust_ref not found. Fetch it (git fetch $remote '+$trust_ref:$trust_ref') and run ./scripts/shiplog-trust-sync.sh"
   fi
 
   local service status reason ticket region cluster ns artifact_tag artifact_image run_url
@@ -1102,9 +1102,30 @@ cmd_export_json() {
   local env="${1:-$DEFAULT_ENV}"
   command -v jq >/dev/null 2>&1 || die "jq required for --json export"
   local ref; ref="$(ref_journal "$env")"
+  # Notes live at the resolved notes ref (policy notes_ref > SHIPLOG_NOTES_REF >
+  # <ref root>/notes/logs); report whether each entry has a log attached there.
+  local notes_ref; notes_ref=$(shiplog_notes_ref)
+  local notes_present=0
+  if git rev-parse -q --verify "$notes_ref" >/dev/null 2>&1; then
+    notes_present=1
+  fi
   git rev-list "$ref" | while read -r c; do
-    git show -s --format=%B "$c" | awk '/^---/{flag=1;next}flag' | jq -c --arg sha "$c" '. + {commit:$sha}'
+    local has_note=false
+    if [ "$notes_present" -eq 1 ] && git notes --ref="$notes_ref" list "$c" >/dev/null 2>&1; then
+      has_note=true
+    fi
+    git show -s --format=%B "$c" | awk '/^---/{flag=1;next}flag' \
+      | jq -c --arg sha "$c" --arg notes_ref "$notes_ref" --argjson has_note "$has_note" \
+          '. + {commit:$sha, notes:{ref:$notes_ref, attached:$has_note}}'
   done
+}
+
+# journal_claims_attached_logs REF
+# True when any entry on REF carries a structured trailer with log_attached=true.
+journal_claims_attached_logs() {
+  local ref="$1"
+  git rev-parse -q --verify "$ref" >/dev/null 2>&1 || return 1
+  git log --format=%B "$ref" 2>/dev/null | grep -Eq '"log_attached":[[:space:]]*true'
 }
 
 cmd_publish() {
@@ -1139,20 +1160,58 @@ EOF
 
   local refs=()
   if [ "$all_envs" -eq 1 ]; then
-    while read -r j; do [ -n "$j" ] && refs+=("$j"); done < <(git for-each-ref "${REF_ROOT}/journal/*" --format='%(refname)')
+    # Prefix match (no glob) so nested journal names under the root are included.
+    while read -r j; do [ -n "$j" ] && refs+=("$j"); done < <(git for-each-ref --format='%(refname)' "$JOURNALS_REF_PREFIX")
   else
     refs+=("$(ref_journal "$env")")
   fi
 
+  local trust_ref="${TRUST_REF:-$TRUST_REF_DEFAULT}"
+  local notes_ref; notes_ref=$(shiplog_notes_ref)
+  local push_output
+
+  # Order matters for a server running the pre-receive hook: journals are
+  # validated against the trust and policy the server already has.
+  if [ "$push_trust" -eq 1 ]; then
+    git rev-parse -q --verify "$trust_ref" >/dev/null 2>&1 || die "shiplog: trust ref $trust_ref not found locally; nothing to publish"
+    if ! push_output=$(git push --no-verify "$remote" "$trust_ref" 2>&1); then
+      die "shiplog: failed to push $trust_ref to $remote: $push_output"
+    fi
+  fi
+  if [ "$push_policy" -eq 1 ]; then
+    git rev-parse -q --verify "$POLICY_REF" >/dev/null 2>&1 || die "shiplog: policy ref $POLICY_REF not found locally; nothing to publish"
+    if ! push_output=$(git push --no-verify "$remote" "$POLICY_REF" 2>&1); then
+      die "shiplog: failed to push $POLICY_REF to $remote: $push_output"
+    fi
+  fi
+
+  # Decide about notes before pushing anything. When the resolved notes ref does
+  # not exist locally but an entry says its log was attached, the notes live
+  # somewhere else (ref root or policy notes_ref drift) and would silently never
+  # be published (#123): refuse instead of pushing journals without their logs.
+  local notes_available=0
+  if [ "$push_notes" -eq 1 ]; then
+    if git rev-parse -q --verify "$notes_ref" >/dev/null 2>&1; then
+      notes_available=1
+    else
+      for r in "${refs[@]}"; do
+        if journal_claims_attached_logs "$r"; then
+          die "shiplog: entries in $r claim log_attached=true but notes ref $notes_ref does not exist locally; check policy notes_ref, SHIPLOG_NOTES_REF and the ref root (git shiplog refs root show) before publishing"
+        fi
+      done
+    fi
+  fi
+
   for r in "${refs[@]}"; do
-    git push --no-verify "$remote" "$r" || die "shiplog: failed to push $r"
-    if [ "$push_notes" -eq 1 ]; then
-      git push --no-verify "$remote" "$NOTES_REF" >/dev/null 2>&1 || true
+    if ! push_output=$(git push --no-verify "$remote" "$r" 2>&1); then
+      die "shiplog: failed to push $r to $remote: $push_output"
     fi
   done
-
-  [ "$push_policy" -eq 1 ] && git push --no-verify "$remote" "$POLICY_REF" >/dev/null 2>&1 || true
-  [ "$push_trust" -eq 1 ] && git push --no-verify "$remote" "${TRUST_REF:-$TRUST_REF_DEFAULT}" >/dev/null 2>&1 || true
+  if [ "$notes_available" -eq 1 ]; then
+    if ! push_output=$(git push --no-verify "$remote" "$notes_ref" 2>&1); then
+      die "shiplog: failed to push notes ref $notes_ref to $remote: $push_output"
+    fi
+  fi
 
   if shiplog_can_use_bosun; then
     local bosun; bosun=$(shiplog_bosun_bin)
@@ -1214,12 +1273,12 @@ cmd_policy() {
           --arg source "${POLICY_SOURCE:-default}" \
           --arg authors "${ALLOWED_AUTHORS_EFFECTIVE:-}" \
           --arg signers "${SIGNERS_FILE_EFFECTIVE:-}" \
-          --arg notes "${NOTES_REF:-refs/_shiplog/notes/logs}" \
+          --arg notes "$(shiplog_notes_ref)" \
           --argjson req "$require_signed_bool" \
           --argjson env "$env_map" \
           '{source:$source, require_signed:$req, allowed_authors:$authors, allowed_signers_file:$signers, notes_ref:$notes, env_require_signed:$env}' \
           || printf '{"source":"%s","require_signed":%s,"allowed_authors":"%s","allowed_signers_file":"%s","notes_ref":"%s","env_require_signed":{}}\n' \
-               "${POLICY_SOURCE:-default}" "$require_signed_bool" "${ALLOWED_AUTHORS_EFFECTIVE:-}" "${SIGNERS_FILE_EFFECTIVE:-}" "${NOTES_REF:-refs/_shiplog/notes/logs}"
+               "${POLICY_SOURCE:-default}" "$require_signed_bool" "${ALLOWED_AUTHORS_EFFECTIVE:-}" "${SIGNERS_FILE_EFFECTIVE:-}" "$(shiplog_notes_ref)"
       else
         local signed_status; if [ "$require_signed_bool" = "true" ]; then signed_status="enabled"; else signed_status="disabled"; fi
         if [ "$boring" -eq 1 ] || ! shiplog_can_use_bosun; then
@@ -1232,7 +1291,7 @@ cmd_policy() {
           printf 'Allowed Signers File: %s
 ' "${SIGNERS_FILE_EFFECTIVE:-<none>}"
           printf 'Notes Ref: %s
-' "${NOTES_REF:-refs/_shiplog/notes/logs}"
+' "$(shiplog_notes_ref)"
           local raw_policy; raw_policy=$(load_raw_policy)
           if [ -n "$raw_policy" ]; then
             printf '%s
@@ -1248,7 +1307,7 @@ cmd_policy() {
 '
           rows+='Allowed Signers File'$'\t'"${SIGNERS_FILE_EFFECTIVE:-<none>}"$'
 '
-          rows+='Notes Ref'$'\t'"${NOTES_REF:-refs/_shiplog/notes/logs}"$'
+          rows+='Notes Ref'$'\t'"$(shiplog_notes_ref)"$'
 '
           raw_policy=$(load_raw_policy)
           if [ -n "$raw_policy" ]; then
@@ -1391,9 +1450,9 @@ cmd_policy() {
       if [ -x "$sync_helper" ]; then
         SHIPLOG_POLICY_SIGN=${SHIPLOG_POLICY_SIGN:-0} "$sync_helper" "$policy_file" >/dev/null
         if [ "$using_bosun" -eq 1 ]; then
-          "$bosun" style --title "Policy" -- "📤 Updated refs/_shiplog/policy/current (push to publish)"
+          "$bosun" style --title "Policy" -- "📤 Updated $POLICY_REF (push to publish)"
         else
-          printf 'Updated policy ref locally. Run: git push --no-verify %s %s\n' "$publish_remote" "refs/_shiplog/policy/current"
+          printf 'Updated policy ref locally. Run: git push --no-verify %s %s\n' "$publish_remote" "$POLICY_REF"
         fi
       else
         printf 'Note: sync helper missing; commit and publish policy manually.\n'
@@ -1524,22 +1583,56 @@ cmd_refs() {
       local action="${1:-show}"; shift || true
       case "$action" in
         show)
-          # Order of precedence: env, git config, default
-          local current_root
-          current_root="${SHIPLOG_REF_ROOT:-}"
-          if [ -z "$current_root" ]; then
-            current_root=$(git config --get shiplog.refRoot 2>/dev/null || true)
+          # REF_ROOT / REF_ROOT_SOURCE were resolved once at startup
+          # (SHIPLOG_REF_ROOT env > git config shiplog.refRoot > default).
+          local as_json=0
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              --json) as_json=1; shift ;;
+              --boring|-b) shift ;;
+              *) die "shiplog: unknown refs root show option: $1" ;;
+            esac
+          done
+          local source_label
+          case "$REF_ROOT_SOURCE" in
+            env) source_label="env (SHIPLOG_REF_ROOT)" ;;
+            config) source_label="config (git config shiplog.refRoot)" ;;
+            *) source_label="default" ;;
+          esac
+          local notes_ref; notes_ref=$(shiplog_notes_ref)
+          if [ "$as_json" -eq 1 ]; then
+            need jq
+            jq -n \
+              --arg root "$REF_ROOT" \
+              --arg source "$REF_ROOT_SOURCE" \
+              --arg journals "$JOURNALS_REF_PREFIX" \
+              --arg anchors "$ANCHORS_REF_PREFIX" \
+              --arg policy "$POLICY_REF" \
+              --arg trust "$TRUST_REF" \
+              --arg notes "$notes_ref" \
+              '{ref_root:$root, source:$source, journals_prefix:$journals, anchors_prefix:$anchors, policy_ref:$policy, trust_ref:$trust, notes_ref:$notes}'
+          else
+            printf 'Ref Root: %s\n' "$REF_ROOT"
+            printf 'Source: %s\n' "$source_label"
+            printf 'Journals: %s/<env>\n' "$JOURNALS_REF_PREFIX"
+            printf 'Anchors: %s/<env>\n' "$ANCHORS_REF_PREFIX"
+            printf 'Policy Ref: %s\n' "$POLICY_REF"
+            printf 'Trust Ref: %s\n' "$TRUST_REF"
+            printf 'Notes Ref: %s\n' "$notes_ref"
           fi
-          current_root="${current_root:-$REF_ROOT}"
-          printf '%s\n' "$current_root"
           ;;
         set)
           local new_root="${1:-}"
           if [ -z "$new_root" ]; then
             die "Usage: git shiplog refs root set <refs/...>"
           fi
-          case "$new_root" in refs/*) : ;; *) die "Ref root must start with 'refs/'" ;; esac
+          local normalized_root
+          normalized_root=$(shiplog_normalize_ref_root "$new_root") || die "shiplog: invalid ref root '$new_root' (expected refs/<name>, e.g. refs/_shiplog or refs/heads/_shiplog)"
+          new_root="$normalized_root"
           git config shiplog.refRoot "$new_root"
+          if [ "$REF_ROOT_SOURCE" = "env" ] && [ "$REF_ROOT" != "$new_root" ]; then
+            printf '⚠️ shiplog: SHIPLOG_REF_ROOT=%s is set in this environment and takes precedence over git config; unset it to use %s\n' "$REF_ROOT" "$new_root" >&2
+          fi
           if shiplog_can_use_bosun; then
             local bosun; bosun=$(shiplog_bosun_bin)
             "$bosun" style --title "Ref Root" -- "Set shiplog.refRoot to $new_root"
@@ -1554,7 +1647,16 @@ cmd_refs() {
       if [ ! -x "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" ]; then
         die "migration helper missing: $SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh"
       fi
-      "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" "$@"
+      # The global flag parser consumes --dry-run before it reaches us; forward
+      # an explicit dry-run so the helper previews instead of migrating.
+      local -a migrate_args=("$@")
+      if [ "${SHIPLOG_DRY_RUN_EXPLICIT:-0}" = "1" ]; then
+        case "${SHIPLOG_DRY_RUN:-0}" in
+          0|false|no|off|'') ;;
+          *) migrate_args+=(--dry-run) ;;
+        esac
+      fi
+      "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" ${migrate_args[@]+"${migrate_args[@]}"}
       ;;
     *) die "Unknown refs subcommand: ${sub:-<none>}" ;;
   esac
@@ -2103,13 +2205,13 @@ Usage:
   verify [ENV]         Verify signatures and authorization of entries
   export-json [ENV]    Export entries as JSON lines
   publish [ENV]        Push/publish journal (and notes) for ENV (default: current env)
-  trust sync [REF]     Refresh signer roster from the trust ref (default: refs/_shiplog/trust/root)
+  trust sync [REF]     Refresh signer roster from the trust ref (default: $TRUST_REF_DEFAULT)
   trust show [REF]     Display trust roster and metadata (use --json for raw output)
   policy [show]        Show current policy configuration
   policy require-signed <true|false>
                        Set signing requirement in .shiplog/policy.json and sync policy ref
   policy toggle        Toggle signing requirement (unsigned ↔ signed) and sync policy ref
-  refs root show       Show current Shiplog ref root
+  refs root show       Show the effective Shiplog ref root, its source (env/config/default) and derived refs (--json)
   refs root set REF    Set Shiplog ref root (e.g., refs/_shiplog or refs/heads/_shiplog)
   refs migrate [OPTS]  Mirror refs between roots (wrapper). Options: --to <refs/...> [--from <refs/...>] [--push] [--remove-old] [--dry-run]
   config               Interactive configuration wizard (questionnaire)

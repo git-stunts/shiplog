@@ -7,8 +7,8 @@ SHIPLOG_HOME="${SHIPLOG_HOME:-$DEFAULT_HOME}"
 LIB_DIR="${SHIPLOG_LIB_DIR:-$SHIPLOG_HOME/lib}"
 
 # -------- Config Defaults --------
-REF_ROOT="${SHIPLOG_REF_ROOT:-refs/_shiplog}"
-NOTES_REF="${SHIPLOG_NOTES_REF:-refs/_shiplog/notes/logs}"
+# Ref layout (REF_ROOT, NOTES_REF, POLICY_REF, TRUST_REF) is resolved below,
+# after the libraries are sourced; see "Ref layout".
 DEFAULT_ENV="${SHIPLOG_ENV:-prod}"
 AUTHOR_ALLOWLIST="${SHIPLOG_AUTHORS:-}"
 ALLOWED_SIGNERS_FILE="${SHIPLOG_ALLOWED_SIGNERS:-.shiplog/allowed_signers}"
@@ -26,11 +26,6 @@ if [ -z "${SHIPLOG_BOSUN_BIN:-}" ]; then
   fi
 fi
 export SHIPLOG_BOSUN_BIN
-
-POLICY_REF_DEFAULT="refs/_shiplog/policy/current"
-POLICY_REF="${SHIPLOG_POLICY_REF:-$POLICY_REF_DEFAULT}"
-TRUST_REF_DEFAULT="refs/_shiplog/trust/root"
-TRUST_REF="${SHIPLOG_TRUST_REF:-$TRUST_REF_DEFAULT}"
 
 SHIPLOG_POLICY_INITIALIZED=0
 POLICY_SOURCE=""
@@ -61,6 +56,30 @@ done
 
 need git
 need jq
+
+# -------- Ref layout --------
+# One root governs every Shiplog ref (#100). Precedence for the root:
+#   SHIPLOG_REF_ROOT (env) > git config shiplog.refRoot > refs/_shiplog
+# Derived from the root unless an explicit SHIPLOG_*_REF override is set:
+#   POLICY_REF  = $REF_ROOT/policy/current   (override: SHIPLOG_POLICY_REF)
+#   TRUST_REF   = $REF_ROOT/trust/root       (override: SHIPLOG_TRUST_REF)
+#   NOTES_REF   = $REF_ROOT/notes/logs       (override: policy notes_ref, SHIPLOG_NOTES_REF)
+#   journals    = $REF_ROOT/journal/<env>    anchors = $REF_ROOT/anchors/<env>
+shiplog_resolve_ref_root
+JOURNALS_REF_PREFIX="$REF_ROOT/journal"
+ANCHORS_REF_PREFIX="$REF_ROOT/anchors"
+NOTES_REF_DEFAULT="$REF_ROOT/notes/logs"
+NOTES_REF="${SHIPLOG_NOTES_REF:-$NOTES_REF_DEFAULT}"
+POLICY_REF_DEFAULT="$REF_ROOT/policy/current"
+POLICY_REF="${SHIPLOG_POLICY_REF:-$POLICY_REF_DEFAULT}"
+TRUST_REF_DEFAULT="$REF_ROOT/trust/root"
+TRUST_REF="${SHIPLOG_TRUST_REF:-$TRUST_REF_DEFAULT}"
+# Helper scripts (sync-policy, bootstrap-trust, trust-sync, migrate) read the
+# resolved layout from these so they never fall back to a hardcoded root.
+export SHIPLOG_REF_ROOT="$REF_ROOT"
+export SHIPLOG_REF_ROOT_SOURCE="$REF_ROOT_SOURCE"
+export SHIPLOG_POLICY_REF="$POLICY_REF"
+export SHIPLOG_TRUST_REF="$TRUST_REF"
 
 shiplog_print_version() {
   printf 'shiplog %s\n' "$(shiplog_version)"

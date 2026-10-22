@@ -10,8 +10,111 @@ else
   exit 1
 fi
 
+# -------- Ref root --------
+# Every Shiplog ref hangs off one root. The root is resolved once per process
+# (SHIPLOG_REF_ROOT env > git config shiplog.refRoot > refs/_shiplog) and the
+# policy, trust, notes, journal and anchors refs are derived from it unless an
+# explicit SHIPLOG_POLICY_REF / SHIPLOG_TRUST_REF / SHIPLOG_NOTES_REF is set.
+SHIPLOG_REF_ROOT_DEFAULT="refs/_shiplog"
+
+# shiplog_normalize_ref_root ROOT
+# Prints the normalized root (trailing slashes stripped) or returns 1 when ROOT
+# is not a usable ref prefix: it must start with "refs/" and pass
+# git check-ref-format.
+shiplog_normalize_ref_root() {
+  local root="${1:-}"
+  while [ -n "$root" ] && [ "$root" != "${root%/}" ]; do
+    root="${root%/}"
+  done
+  case "$root" in
+    refs/?*) ;;
+    *) return 1 ;;
+  esac
+  git check-ref-format --allow-onelevel "$root/x" >/dev/null 2>&1 || return 1
+  printf '%s' "$root"
+}
+
+# shiplog_resolve_ref_root
+# Sets REF_ROOT and REF_ROOT_SOURCE (env|config|default). Dies on an invalid
+# root so a typo in SHIPLOG_REF_ROOT or shiplog.refRoot cannot scatter refs.
+shiplog_resolve_ref_root() {
+  local raw="" source=""
+  if [ -n "${SHIPLOG_REF_ROOT:-}" ]; then
+    raw="$SHIPLOG_REF_ROOT"
+    source="env"
+  else
+    raw=$(git config --get shiplog.refRoot 2>/dev/null || true)
+    if [ -n "$raw" ]; then
+      source="config"
+    else
+      raw="$SHIPLOG_REF_ROOT_DEFAULT"
+      source="default"
+    fi
+  fi
+  local normalized
+  if ! normalized=$(shiplog_normalize_ref_root "$raw"); then
+    local where
+    case "$source" in
+      env) where="SHIPLOG_REF_ROOT" ;;
+      config) where="git config shiplog.refRoot" ;;
+      *) where="built-in default" ;;
+    esac
+    die "shiplog: invalid ref root '$raw' from $where (expected refs/<name>, e.g. refs/_shiplog or refs/heads/_shiplog)"
+  fi
+  REF_ROOT="$normalized"
+  REF_ROOT_SOURCE="$source"
+}
+
 ref_journal() { echo "$REF_ROOT/journal/$1"; }
 ref_anchor()  { echo "$REF_ROOT/anchors/$1"; }
+
+# shiplog_raw_policy_json
+# Prints the raw policy document (policy ref first, then the working-tree
+# file) without resolving it and without requiring a signers file.
+shiplog_raw_policy_json() {
+  local raw=""
+  local policy_ref="${POLICY_REF:-${POLICY_REF_DEFAULT:-$REF_ROOT/policy/current}}"
+  if git rev-parse -q --verify "$policy_ref" >/dev/null 2>&1; then
+    raw=$(git show "$policy_ref:.shiplog/policy.json" 2>/dev/null || true)
+  fi
+  if [ -z "$raw" ]; then
+    local top
+    top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    if [ -n "$top" ] && [ -f "$top/.shiplog/policy.json" ]; then
+      raw=$(cat "$top/.shiplog/policy.json" 2>/dev/null || true)
+    fi
+  fi
+  printf '%s' "$raw"
+}
+
+# shiplog_notes_ref
+# Prints the effective notes ref: policy `notes_ref` > SHIPLOG_NOTES_REF >
+# <ref root>/notes/logs. Every command that reads, attaches or pushes notes
+# (write, show, export-json, publish) uses this so attached logs stay visible
+# and get published (#123). Cached per process.
+SHIPLOG_NOTES_REF_EFFECTIVE=""
+shiplog_notes_ref() {
+  if [ -n "$SHIPLOG_NOTES_REF_EFFECTIVE" ]; then
+    printf '%s' "$SHIPLOG_NOTES_REF_EFFECTIVE"
+    return 0
+  fi
+  local result="" raw policy_notes=""
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    raw=$(shiplog_raw_policy_json)
+    if [ -n "$raw" ] && command -v jq >/dev/null 2>&1; then
+      policy_notes=$(printf '%s\n' "$raw" | jq -r '.notes_ref // empty' 2>/dev/null || true)
+    fi
+  fi
+  if [ -n "$policy_notes" ]; then
+    result="$policy_notes"
+  elif [ -n "${SHIPLOG_NOTES_REF:-}" ]; then
+    result="$SHIPLOG_NOTES_REF"
+  else
+    result="${NOTES_REF_DEFAULT:-$REF_ROOT/notes/logs}"
+  fi
+  SHIPLOG_NOTES_REF_EFFECTIVE="$result"
+  printf '%s' "$result"
+}
 
 empty_tree()  { git hash-object -t tree /dev/null; }
 
@@ -204,7 +307,7 @@ attach_note_if_present() {
     shiplog_dry_run_notice "Would attach note to $commit"
     return 0
   fi
-  git notes --ref="$NOTES_REF" add -F "$log_path" "$commit"
+  git notes --ref="$(shiplog_notes_ref)" add -F "$log_path" "$commit"
 }
 
 ensure_signed_on_verify() {
@@ -347,7 +450,8 @@ pretty_ls() {
 
 show_entry() {
   local target="$1"
-  local body human json
+  local body human json notes_ref
+  notes_ref=$(shiplog_notes_ref)
   body="$(git show -s --format=%B "$target")"
   human="$(awk '/^---/{exit} {print}' <<< "$body")"
   json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
@@ -370,8 +474,8 @@ show_entry() {
         printf '%s\n' "$json"
       fi
     fi
-    if git notes --ref="$NOTES_REF" show "$target" >/dev/null 2>&1; then
-      git notes --ref="$NOTES_REF" show "$target"
+    if git notes --ref="$notes_ref" show "$target" >/dev/null 2>&1; then
+      git notes --ref="$notes_ref" show "$target"
     fi
     return 0
   fi
@@ -386,8 +490,8 @@ show_entry() {
     fi
   fi
 
-  if git notes --ref="$NOTES_REF" show "$target" >/dev/null 2>&1; then
-    git notes --ref="$NOTES_REF" show "$target" | "$bosun_bin" style --title "Attached Log (notes)"
+  if git notes --ref="$notes_ref" show "$target" >/dev/null 2>&1; then
+    git notes --ref="$notes_ref" show "$target" | "$bosun_bin" style --title "Attached Log (notes)"
   fi
 }
 

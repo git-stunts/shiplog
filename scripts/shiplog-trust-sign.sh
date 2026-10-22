@@ -75,7 +75,7 @@ done
 export SHIPLOG_TRUST_NAMESPACE="$NAMESPACE"
 
 TRUST_COMMIT="${1:-}"
-[ -n "$TRUST_COMMIT" ] || TRUST_COMMIT="$(git rev-parse --verify "${SHIPLOG_TRUST_REF:-refs/_shiplog/trust/root}" 2>/dev/null || true)"
+[ -n "$TRUST_COMMIT" ] || TRUST_COMMIT="$(git rev-parse --verify "${SHIPLOG_TRUST_REF:-${SHIPLOG_REF_ROOT:-refs/_shiplog}/trust/root}" 2>/dev/null || true)"
 [ -n "$TRUST_COMMIT" ] || die "cannot resolve trust commit; pass COMMIT or set SHIPLOG_TRUST_REF"
 git cat-file -e "$TRUST_COMMIT:trust.json" 2>/dev/null || die "trust.json not found at $TRUST_COMMIT:trust.json"
 

@@ -37,7 +37,8 @@ usage() {
   cat <<'USAGE'
 shiplog-bootstrap-trust.sh
 
-Bootstraps the signer roster for refs/_shiplog/trust/root by gathering maintainer metadata,
+Bootstraps the signer roster for <ref root>/trust/root (default refs/_shiplog/trust/root;
+honors SHIPLOG_TRUST_REF, SHIPLOG_REF_ROOT and git config shiplog.refRoot) by gathering maintainer metadata,
 writing .shiplog/trust.json and .shiplog/allowed_signers, building the genesis commit, and
 (optionally) pushing it to the configured remote (defaults to origin).
 
@@ -45,7 +46,7 @@ Usage: shiplog-bootstrap-trust.sh [--force] [--no-push] [--yes] [--plain]
        shiplog-bootstrap-trust.sh [TRUST_OPTIONS...] [--force] [--no-push]
 
 Options:
-  --force     overwrite existing trust files or refs/_shiplog/trust/root
+  --force     overwrite existing trust files or the trust ref
   --no-push   generate the trust commit but skip the final git push
   --yes       assume yes for confirmations (or set SHIPLOG_ASSUME_YES=1)
   --plain     disable Bosun UI; use plain prompts (or set SHIPLOG_PLAIN=1)
@@ -218,7 +219,14 @@ fi
 
 SHIPLOG_REMOTE_NAME="$(shiplog_remote_name)"
 
-TRUST_REF="refs/_shiplog/trust/root"
+# Trust ref follows the configured ref root (SHIPLOG_TRUST_REF > SHIPLOG_REF_ROOT >
+# git config shiplog.refRoot > refs/_shiplog). The CLI exports the resolved values.
+TRUST_REF="${SHIPLOG_TRUST_REF:-}"
+if [ -z "$TRUST_REF" ]; then
+  REF_ROOT_FOR_TRUST="${SHIPLOG_REF_ROOT:-$(git config --get shiplog.refRoot 2>/dev/null || true)}"
+  REF_ROOT_FOR_TRUST="${REF_ROOT_FOR_TRUST:-refs/_shiplog}"
+  TRUST_REF="${REF_ROOT_FOR_TRUST%/}/trust/root"
+fi
 if git show-ref --verify --quiet "$TRUST_REF" && [ "$FORCE" -ne 1 ]; then
   die "$TRUST_REF already exists. Use --force to overwrite it."
 fi

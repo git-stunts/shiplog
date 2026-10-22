@@ -1,7 +1,14 @@
 #!/usr/bin/env sh
 set -eu
 
-TRUST_REF="${1:-refs/_shiplog/trust/root}"
+# Default trust ref follows the configured ref root (SHIPLOG_TRUST_REF >
+# SHIPLOG_REF_ROOT > git config shiplog.refRoot > refs/_shiplog).
+if [ -z "${SHIPLOG_TRUST_REF:-}" ]; then
+  SHIPLOG_REF_ROOT_EFFECTIVE="${SHIPLOG_REF_ROOT:-$(git config --get shiplog.refRoot 2>/dev/null || true)}"
+  SHIPLOG_REF_ROOT_EFFECTIVE="${SHIPLOG_REF_ROOT_EFFECTIVE:-refs/_shiplog}"
+  SHIPLOG_TRUST_REF="${SHIPLOG_REF_ROOT_EFFECTIVE%/}/trust/root"
+fi
+TRUST_REF="${1:-$SHIPLOG_TRUST_REF}"
 DEST="${2:-.shiplog/allowed_signers}"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
