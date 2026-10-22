@@ -116,6 +116,46 @@ shiplog_notes_ref() {
   printf '%s' "$result"
 }
 
+# shiplog_ensure_notes_alias NOTES_REF
+# `git notes --ref=X` operates on refs/notes/X unless X already starts with
+# refs/notes/. Shiplog keeps notes under the ref root so they are published and
+# protected together with the journals, so refs/notes/X is made a symbolic ref
+# to X: every `git notes --ref=X` call (ours, scripts, users) then reads and
+# writes the real ref. Notes previously written at the legacy location
+# refs/notes/X are adopted into X the first time this runs.
+shiplog_ensure_notes_alias() {
+  local notes_ref="$1"
+  [ -n "$notes_ref" ] || return 0
+  case "$notes_ref" in
+    refs/notes/*) return 0 ;;
+  esac
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  local alias="refs/notes/$notes_ref"
+  local current legacy
+  if current=$(git symbolic-ref -q "$alias" 2>/dev/null); then
+    [ "$current" = "$notes_ref" ] && return 0
+  elif legacy=$(git rev-parse -q --verify "$alias^{commit}" 2>/dev/null); then
+    if ! git rev-parse -q --verify "$notes_ref" >/dev/null 2>&1; then
+      git update-ref "$notes_ref" "$legacy" || return 0
+    elif [ "$(git rev-parse "$notes_ref")" != "$legacy" ]; then
+      printf '⚠️ shiplog: notes at legacy location %s (%s) differ from %s; keeping %s (the legacy commit stays reachable via your reflog)\n' \
+        "$alias" "$legacy" "$notes_ref" "$notes_ref" >&2
+    fi
+    git update-ref -d "$alias" "$legacy" || return 0
+  fi
+  git symbolic-ref "$alias" "$notes_ref" 2>/dev/null || true
+}
+
+# shiplog_notes_git_ref
+# The value to pass to `git notes --ref=`: the effective notes ref, with its
+# refs/notes/ alias in place so git touches the real ref.
+shiplog_notes_git_ref() {
+  local notes_ref
+  notes_ref=$(shiplog_notes_ref)
+  shiplog_ensure_notes_alias "$notes_ref"
+  printf '%s' "$notes_ref"
+}
+
 empty_tree()  { git hash-object -t tree /dev/null; }
 
 current_tip() { git rev-parse --verify "$1" 2>/dev/null || true; }
@@ -307,7 +347,7 @@ attach_note_if_present() {
     shiplog_dry_run_notice "Would attach note to $commit"
     return 0
   fi
-  git notes --ref="$(shiplog_notes_ref)" add -F "$log_path" "$commit"
+  git notes --ref="$(shiplog_notes_git_ref)" add -F "$log_path" "$commit"
 }
 
 ensure_signed_on_verify() {
@@ -451,7 +491,7 @@ pretty_ls() {
 show_entry() {
   local target="$1"
   local body human json notes_ref
-  notes_ref=$(shiplog_notes_ref)
+  notes_ref=$(shiplog_notes_git_ref)
   body="$(git show -s --format=%B "$target")"
   human="$(awk '/^---/{exit} {print}' <<< "$body")"
   json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"

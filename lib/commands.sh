@@ -1104,7 +1104,7 @@ cmd_export_json() {
   local ref; ref="$(ref_journal "$env")"
   # Notes live at the resolved notes ref (policy notes_ref > SHIPLOG_NOTES_REF >
   # <ref root>/notes/logs); report whether each entry has a log attached there.
-  local notes_ref; notes_ref=$(shiplog_notes_ref)
+  local notes_ref; notes_ref=$(shiplog_notes_git_ref)
   local notes_present=0
   if git rev-parse -q --verify "$notes_ref" >/dev/null 2>&1; then
     notes_present=1
