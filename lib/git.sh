@@ -347,7 +347,17 @@ attach_note_if_present() {
     shiplog_dry_run_notice "Would attach note to $commit"
     return 0
   fi
-  git notes --ref="$(shiplog_notes_git_ref)" add -F "$log_path" "$commit"
+  # The refs/notes alias dangles until the first note creates the real ref;
+  # git prints a one-time "ignoring dangling symref" warning for it. Keep every
+  # other diagnostic.
+  local notes_output
+  if ! notes_output=$(git notes --ref="$(shiplog_notes_git_ref)" add -F "$log_path" "$commit" 2>&1); then
+    [ -n "$notes_output" ] && printf '%s\n' "$notes_output" >&2
+    return 1
+  fi
+  if [ -n "$notes_output" ]; then
+    printf '%s\n' "$notes_output" | grep -v 'ignoring dangling symref' >&2 || true
+  fi
 }
 
 ensure_signed_on_verify() {
