@@ -227,6 +227,9 @@ Yes. It's `git` and `bash`. Push when you can.
 **Can an attacker rewrite history?**
 Journals are fast-forward-only and chained by `seq`/`journal_parent`, so a rewrite is detectable. Whether it's *prevented* depends on your host's enforcement, and that's exactly the layer in [dry dock](#dry-dock-) right now. We are not going to tell you it's bulletproof until the adversarial suite says so.
 
+**Does Shiplog use Shiplog?**
+Not yet, and yes, we heard you. Roadmap goal G9 makes this repo record its own CI runs and releases in its own ledger, on GitHub.com, under the branch namespace, with `verify` as a required check. A deploy ledger that doesn't log its own deploys would be a bit much.
+
 **What's the `--boring` flag?**
 Turns off colors and prompts. Named for how deploys should feel.
 
