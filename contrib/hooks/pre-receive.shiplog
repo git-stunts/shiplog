@@ -520,9 +520,21 @@ attestation_verify() {
   [ "$verified" -ge "$threshold" ]
 }
 
+# Mirrors shiplog_extract_trailer in lib/git.sh: the trailer starts after the
+# LAST writer sentinel line; entries without one fall back to the last bare
+# `---` line. Header text can therefore never shift the parse (SLT.BUG.CLI.001).
+TRAILER_SENTINEL='---  # structured trailer for machines'
 read_commit_json() {
   local commit="$1"
-  git show -s --format=%B "$commit" | awk '/^---/{flag=1;next}flag'
+  git show -s --format=%B "$commit" | awk -v sentinel="$TRAILER_SENTINEL" '
+    { line[NR] = $0 }
+    $0 == sentinel { exact = NR }
+    /^---/ { bare = NR }
+    END {
+      sep = exact ? exact : bare
+      if (!sep) exit
+      for (i = sep + 1; i <= NR; i++) print line[i]
+    }'
 }
 
 get_commit_seq() {
@@ -605,8 +617,13 @@ validate_journal_commit() {
     [ "$seq" -eq "$expected" ] || error "commit $commit seq $seq expected $expected"
   fi
 
-  local author
+  local author who_email
   author=$(git show -s --format='%ae' "$commit")
+  # The identity the allowlist is checked against must be the identity the
+  # entry claims (SLT.BUG.LIB.012): trailer who.email == commit author.
+  who_email=$("$JQ_BIN" -r '.who.email // empty' <<<"$json")
+  [ -n "$who_email" ] || error "commit $commit trailer is missing who.email"
+  [ "$who_email" = "$author" ] || error "commit $commit trailer who.email <$who_email> does not match commit author <$author>"
   ensure_author_allowed "$author" "$allowlist"
   ensure_commit_signed_if_required "$commit" "$require_signed"
 }
