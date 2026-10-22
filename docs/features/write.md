@@ -23,6 +23,9 @@ Tip (non‑interactive/CI): avoid prompts by passing required fields via flags o
 - Defaults the namespace to the journal environment when left blank (e.g., `prod`).
 - Generates both a human-readable header and a JSON trailer; optionally attaches NDJSON logs via `SHIPLOG_LOG`.
 - Human-readable header hides missing location parts: if you only provide `env=prod`, it renders `→ prod` (no placeholders for region/cluster/namespace).
+- Header fields are single-line. Newlines and carriage returns in `service`, `status`, `reason`, `ticket`, `region`, `cluster`, `namespace`, `image`, `tag` and `run_url` are replaced with a space before the entry is composed, so pasted Markdown or YAML (including a `---` line) can never break the structured trailer. The sanitized value is what the trailer records (`why.reason` for `rollback\n---\nsee runbook` becomes `rollback --- see runbook`).
+- `status` must be one of `success`, `failed`, `in_progress`, `skipped`, `override`, `revert`, `finalize`; anything else aborts with `shiplog: invalid status '<value>'`.
+- `SHIPLOG_AUTHOR_NAME` / `SHIPLOG_AUTHOR_EMAIL` (or `GIT_AUTHOR_*`) set the identity used for the allowlist check, the trailer's `who`, and both the author and committer of the journal commit. The pre-receive hook rejects an entry whose `who.email` differs from the commit author.
 - Accepts `--yes` to skip confirmation prompts (sets `SHIPLOG_ASSUME_YES=1`).
 - Fast-forwards the journal ref; aborts if the ref is missing or would require a force update.
 - Automatically pushes the updated journal (and attached notes) to `origin` when available; disable with `SHIPLOG_AUTO_PUSH=0` or `--no-push`.
@@ -69,5 +72,5 @@ printf '{"checks": {"canary": "green"}}' | \
 ```
 
 - Accepts the same metadata flags as `write` but runs in boring/auto-confirm mode.
-- `--json` (or `--json-file path`) must contain a JSON object; Shiplog merges it into the structured trailer via `SHIPLOG_EXTRA_JSON`.
+- `--json` (or `--json-file path`) must contain a JSON object; Shiplog merges it into the structured trailer via `SHIPLOG_EXTRA_JSON`. Payloads that name a reserved core key (`seq`, `status`, `trust_oid`, `run`, ... see `docs/reference/json-schema.md`) are rejected with the key name; nest your data under your own key.
 - Attach logs with `--log <path>` if desired.

@@ -353,6 +353,24 @@ EOF
   artifact_tag="$(shiplog_prompt_input "artifact tag (e.g., 2025-09-19.3)" "SHIPLOG_TAG")"
   run_url="$(shiplog_prompt_input "pipeline/run URL (optional)" "SHIPLOG_RUN_URL")"
 
+  # Header fields are single-line: newlines become spaces so user text can
+  # never add a header line, let alone one that looks like the trailer
+  # separator (SLT.BUG.CLI.001). Documented in docs/features/write.md.
+  service="$(shiplog_single_line "$service")"
+  status="$(shiplog_single_line "$status")"
+  reason="$(shiplog_single_line "$reason")"
+  ticket="$(shiplog_single_line "$ticket")"
+  region="$(shiplog_single_line "$region")"
+  cluster="$(shiplog_single_line "$cluster")"
+  ns="$(shiplog_single_line "$ns")"
+  artifact_image="$(shiplog_single_line "$artifact_image")"
+  artifact_tag="$(shiplog_single_line "$artifact_tag")"
+  run_url="$(shiplog_single_line "$run_url")"
+
+  if ! shiplog_status_is_valid "$status"; then
+    die "shiplog: invalid status '$status' (expected one of: $SHIPLOG_STATUS_VALUES)"
+  fi
+
   if [ -z "$ns" ]; then
     ns="$env"
   fi
@@ -643,10 +661,27 @@ cmd_run() {
     start_epoch=$(date -u +%s)
 
     if [ "$tee_output" -eq 1 ]; then
+      # Stream to the terminal and the log through two named pipes, one per
+      # stream, each drained by a background tee that is awaited before the log
+      # is read (SLT.BUG.CLI.011). Process substitutions cannot be waited on and
+      # left the log truncated. Trade-off: stdout and stderr travel through
+      # separate pipes, so their interleaving in the log may differ slightly
+      # from the terminal order (same as before); each stream is complete and
+      # in order. A child that keeps the pipes open after the command exits
+      # delays the entry until it closes them, as with `cmd | tee`.
+      local fifo_dir pid_out pid_err
+      fifo_dir=$(mktemp -d) || die "shiplog: failed to allocate run pipes"
+      mkfifo "$fifo_dir/out" "$fifo_dir/err" || die "shiplog: failed to create run pipes"
+      tee -a "$log_path" <"$fifo_dir/out" &
+      pid_out=$!
+      tee -a "$log_path" <"$fifo_dir/err" >&2 &
+      pid_err=$!
       set +e
-      "${run_argv[@]}" > >(tee -a "$log_path") 2> >(tee -a "$log_path" >&2)
+      "${run_argv[@]}" >"$fifo_dir/out" 2>"$fifo_dir/err"
       cmd_status=$?
+      wait "$pid_out" "$pid_err"
       set -e
+      rm -rf "$fifo_dir"
     else
       set +e
       "${run_argv[@]}" >"$log_path" 2>&1
@@ -681,8 +716,11 @@ cmd_run() {
   local argv_json
   argv_json=$(printf '%s\n' "${run_argv[@]}" | jq -R . | jq -s .)
 
-  local extra_json
-  extra_json=$(jq -n \
+  # The run block travels through SHIPLOG_RUN_JSON, an internal core-key
+  # channel, not SHIPLOG_EXTRA_JSON: `run` is a reserved trailer key and extras
+  # are not allowed to set it (SLT.BUG.CLI.010).
+  local run_json
+  run_json=$(jq -n \
     --argjson argv "$argv_json" \
     --arg cmd "$cmd_display" \
     --arg status "$run_status" \
@@ -691,7 +729,7 @@ cmd_run() {
     --argjson exit_code "$cmd_status" \
     --argjson duration "$duration_s" \
     --argjson log_attached "$log_attached_bool" \
-    '{run: {argv: $argv, cmd: $cmd, exit_code: $exit_code, status: $status, duration_s: $duration, started_at: $started, finished_at: $finished, log_attached: $log_attached}}'
+    '{argv: $argv, cmd: $cmd, exit_code: $exit_code, status: $status, duration_s: $duration, started_at: $started, finished_at: $finished, log_attached: $log_attached}'
   )
 
   local had_boring=0 prev_boring=""
@@ -716,11 +754,11 @@ cmd_run() {
     attach_log=1
   fi
 
-  local had_extra=0 prev_extra=""
-  if [ "${SHIPLOG_EXTRA_JSON+x}" = x ]; then
-    had_extra=1; prev_extra="$SHIPLOG_EXTRA_JSON"
+  local had_run_json=0 prev_run_json=""
+  if [ "${SHIPLOG_RUN_JSON+x}" = x ]; then
+    had_run_json=1; prev_run_json="$SHIPLOG_RUN_JSON"
   fi
-  SHIPLOG_EXTRA_JSON="$extra_json"; export SHIPLOG_EXTRA_JSON
+  SHIPLOG_RUN_JSON="$run_json"; export SHIPLOG_RUN_JSON
 
   local had_status=0 prev_status=""
   if [ "${SHIPLOG_STATUS+x}" = x ]; then
@@ -764,18 +802,21 @@ cmd_run() {
   fi
   SHIPLOG_CLUSTER="$cluster"; export SHIPLOG_CLUSTER
 
-  local write_status
-  # For dry-run, surface cmd_write's preview lines; otherwise suppress verbose preview
-  if [ "$dry_run" -eq 1 ] || [ "$skip_execution" -eq 1 ]; then
-    (
-      cmd_write --env "$env"
-    )
-  else
-    (
-      cmd_write --env "$env"
-    ) >/dev/null 2>&1
-  fi
+  # Capture cmd_write's status without letting errexit abort cmd_run before the
+  # diagnostics print (SLT.BUG.CLI.002). Not `out=$( (...) ) || st=$?`: bash
+  # ignores -e inside a subshell that is part of an || list, which would let a
+  # failure inside cmd_write continue silently. Instead errexit is switched off
+  # in this shell for the capture and switched back on inside the subshell.
+  local write_status=0 write_output=""
+  set +e
+  write_output=$( (set -e; cmd_write --env "$env") 2>&1 )
   write_status=$?
+  set -e
+  if [ "$dry_run" -eq 1 ] || [ "$skip_execution" -eq 1 ]; then
+    if [ -n "$write_output" ] && [ "$write_status" -eq 0 ]; then
+      printf '%s\n' "$write_output"
+    fi
+  fi
 
   if [ $had_boring -eq 1 ]; then
     SHIPLOG_BORING="$prev_boring"; export SHIPLOG_BORING
@@ -798,10 +839,10 @@ cmd_run() {
   else
     unset SHIPLOG_LOG
   fi
-  if [ $had_extra -eq 1 ]; then
-    SHIPLOG_EXTRA_JSON="$prev_extra"; export SHIPLOG_EXTRA_JSON
+  if [ $had_run_json -eq 1 ]; then
+    SHIPLOG_RUN_JSON="$prev_run_json"; export SHIPLOG_RUN_JSON
   else
-    unset SHIPLOG_EXTRA_JSON
+    unset SHIPLOG_RUN_JSON
   fi
   if [ $had_status -eq 1 ]; then
     SHIPLOG_STATUS="$prev_status"; export SHIPLOG_STATUS
@@ -855,8 +896,17 @@ cmd_run() {
       printf '%s\n' "$msg"
     fi
   else
+    # Show why the write failed (cmd_write's own diagnostics), then where the
+    # wrapped command's output was kept. The wrapped command's failure code is
+    # never masked; a write failure after a successful command exits 1.
+    if [ -n "$write_output" ]; then
+      printf '%s\n' "$write_output" >&2
+    fi
     printf '❌ shiplog: failed to record run entry; log preserved at %s\n' "$log_path" >&2
-    return $write_status
+    if [ "$cmd_status" -ne 0 ]; then
+      return "$cmd_status"
+    fi
+    return 1
   fi
 
   return "$cmd_status"
@@ -980,6 +1030,9 @@ EOF
   else
     die "shiplog: --json payload must be a JSON object"
   fi
+  # Extras may not forge core fields (seq, status, trust_oid, ...); the check
+  # names the offending key (SLT.BUG.CLI.010). compose_message repeats it.
+  shiplog_extra_json_check "$extra_json" "--json payload"
 
   if [ -z "$service" ]; then
     die "shiplog: --service (or SHIPLOG_SERVICE) is required in append"
@@ -2186,7 +2239,7 @@ cmd_validate_trailer() {
   if [ -z "$body" ]; then
     die "Cannot read commit body for $target"
   fi
-  json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+  json="$(shiplog_extract_trailer <<< "$body")"
   if [ -z "$json" ]; then
     die "No JSON trailer found in entry $target"
   fi

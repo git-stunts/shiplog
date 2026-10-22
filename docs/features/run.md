@@ -23,9 +23,9 @@ git shiplog run --dry-run --service deploy --reason "Smoke test" -- env printf h
 - Deterministic output keeps automation safe while rehearsing deploy playbooks.
 
 ## Behavior (Standard Runs)
-- Captures stdout/stderr to a temporary file. When Bosun is available, output streams live while still being recorded for notes.
+- Captures stdout/stderr to a temporary file. When not in `--boring` mode, output streams live through two named pipes (one per stream) while still being recorded; Shiplog waits for both writers before attaching the log, so the note holds the complete output. Because the streams travel separately, their interleaving in the log may differ slightly from what the terminal showed; each stream is complete and in order.
 - Sets `SHIPLOG_BORING=1` and `SHIPLOG_ASSUME_YES=1` while delegating to `git shiplog write`, ensuring prompts are bypassed.
-- Populates `SHIPLOG_EXTRA_JSON` with a `run` block such as:
+- Attaches a `run` block to the trailer (through the internal `SHIPLOG_RUN_JSON` channel; `run` is a reserved key that `SHIPLOG_EXTRA_JSON` cannot override) such as:
   ```json
   {
     "run": {
@@ -57,6 +57,7 @@ git shiplog run --dry-run --service deploy --reason "Smoke test" -- env printf h
 - Standard run
   - Mirrors the wrapped command’s exit status after the journal entry is recorded.
   - Propagates Shiplog errors directly if the CLI fails before wrapping the command.
+  - If the journal write fails after the command ran, Shiplog prints the write error (for example a missing trust ref or an allowlist rejection) followed by `❌ shiplog: failed to record run entry; log preserved at <path>`. The exit code is the wrapped command’s non-zero status when it failed, otherwise `1`.
 
 ## Options
 - `--dry-run` — Preview the command and metadata without executing or writing an entry.

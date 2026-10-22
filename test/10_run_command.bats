@@ -98,3 +98,63 @@ teardown() {
   run git show-ref "$journal_ref"
   [ "$status" -ne 0 ]
 }
+
+# --- SLT.BUG.CLI.002 (#98): a failed write explains itself ------------------
+
+@test "run reports the write failure and the preserved log path" {
+  git update-ref -d "${SHIPLOG_TRUST_REF:-refs/_shiplog/trust/root}"
+  run git shiplog run --service t -- sh -c 'echo run-output-marker'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"trust ref"* ]]
+  [[ "$output" == *"failed to record run entry"* ]]
+  local log_path
+  log_path=$(printf '%s\n' "$output" | sed -n 's/.*log preserved at //p' | tail -n 1)
+  [ -n "$log_path" ]
+  [ -f "$log_path" ]
+  grep -q 'run-output-marker' "$log_path"
+  rm -f "$log_path"
+}
+
+@test "run: a write failure never masks the wrapped command's exit code" {
+  git update-ref -d "${SHIPLOG_TRUST_REF:-refs/_shiplog/trust/root}"
+  run git shiplog run --service t -- sh -c 'exit 7'
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"failed to record run entry"* ]]
+}
+
+@test "run: extras cannot override the reserved run block" {
+  run env SHIPLOG_EXTRA_JSON='{"run":{"exit_code":0}}' git shiplog run --service t -- true
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'reserved trailer key "run"'* ]]
+  run git show-ref "${REF_ROOT}/journal/prod"
+  [ "$status" -ne 0 ]
+}
+
+# --- SLT.BUG.CLI.011 (#122): the log is complete when it is attached --------
+
+@test "run attaches the complete log for bursty output (5 runs)" {
+  local i sha count attached
+  for i in 1 2 3 4 5; do
+    run git shiplog run --service t -- sh -c 'head -c 2000000 /dev/zero | tr "\0" x' </dev/null
+    [ "$status" -eq 0 ]
+    sha=$(git rev-parse "${REF_ROOT}/journal/prod")
+    count=$(git notes --ref="${NOTES_REF}" show "$sha" | tr -cd x | wc -c | tr -d ' ')
+    [ "$count" -eq 2000000 ]
+    attached=$(git shiplog show --json "$sha" | jq -r '.run.log_attached')
+    [ "$attached" = "true" ]
+  done
+}
+
+@test "run preserves the exit code and records both streams" {
+  run git shiplog run --service t -- sh -c 'echo out-line; echo err-line >&2; exit 7'
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"out-line"* ]]
+  [[ "$output" == *"err-line"* ]]
+  sha=$(git rev-parse "${REF_ROOT}/journal/prod")
+  run git notes --ref="${NOTES_REF}" show "$sha"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"out-line"* ]]
+  [[ "$output" == *"err-line"* ]]
+  run bash -lc "git shiplog show --json $sha | jq -r '.run.exit_code'"
+  [ "$output" = "7" ]
+}
