@@ -12,7 +12,7 @@ This runbook walks through protecting Shiplog refs on GitHub.com using Rulesets 
   - Pros: visible in Branches UI; Branch Rulesets apply; Actions can trigger on pushes.
   - Cons: visible “system branches”; branch cleanup bots could target them if not excluded.
 
-See [[docs/hosting/github.md]] for a detailed tradeoff.
+See [docs/hosting/github.md](../hosting/github.md) for a detailed tradeoff.
 
 ## 2) (Optional) Migrate to Branch Namespace
 

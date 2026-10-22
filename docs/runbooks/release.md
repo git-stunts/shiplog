@@ -6,7 +6,7 @@ This runbook shows how to cut a Shiplog MVP release using Shiplog itself. It cov
 
 - Trust is bootstrapped and pushed to the canonical remote (`refs/_shiplog/trust/root`). Use `scripts/shiplog-bootstrap-trust.sh` if not done yet.
 - Policy exists locally in `.shiplog/policy.json` and is published at `refs/_shiplog/policy/current` (see below).
-- Your workstation has Git 2.35+ and jq 1.7.1. Run releases from Docker/Dev Container if unsure.
+- Your workstation has Git 2.35+ and jq 1.6 or newer. Run releases from Docker/Dev Container if unsure.
 
 ## 1) Sync Allowed Signers
 
@@ -33,6 +33,7 @@ git push origin refs/_shiplog/policy/current
 ```
 
 Notes:
+
 - The script validates `.shiplog/policy.json` against `examples/policy.schema.json` when jq’s `--schema` is available.
 - CI can run the same script after a policy PR merges.
 
@@ -103,4 +104,3 @@ Use a protected GitHub Environment to store the signing key (SSH preferred). In 
 - `git push origin refs/_shiplog/journal/prod`
 
 Keep this job manual or restricted to tag merges until your process matures.
-

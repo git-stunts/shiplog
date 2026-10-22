@@ -6,7 +6,7 @@ Note: The host‑aware questionnaire lives under `git shiplog config --interacti
 
 ## Usage
 
-```
+```bash
 git shiplog setup \
   [--strictness open|balanced|strict] \
   [--authors "a@x b@y"] \
@@ -20,6 +20,7 @@ SHIPLOG_SETUP_STRICT_ENVS="prod staging" \
 SHIPLOG_SETUP_AUTHORS="you@example.com teammate@example.com" \
 SHIPLOG_SETUP_AUTO_PUSH=1 \
   git shiplog setup
+```
 
 ### Choose a Trust Signing Mode (chain vs attestation)
 
@@ -70,12 +71,14 @@ git shiplog setup \
 ```
 
 Flags (repeat `--trust-maintainer` as needed):
+
 - `--trust-id ID`
 - `--trust-threshold N` (≤ number of maintainers)
 - `--trust-message "Commit message"` (optional)
 - `--trust-maintainer "name=<n>,email=<e>,key=<ssh_pub_path>[,principal=<p>][,role=<r>][,revoked=<yes|no>][,pgp=<fpr>]"`
 
 Notes:
+
 - In CI/non‑TTY: if these flags (or the `SHIPLOG_TRUST_*` envs) are not set, trust bootstrap is skipped for per‑env strictness or fails fast for global strictness instead of prompting.
 
 ## Dry Run

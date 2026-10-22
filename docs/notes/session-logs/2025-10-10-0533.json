@@ -1,0 +1,46 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Propagate relaxed-hook detection pattern to config wizard outputs"
+    }
+  ],
+  "date": "2025-10-10",
+  "key_decisions": [
+    "Warn operators about SHIPLOG_ALLOW_MISSING_{POLICY,TRUST} when remote refs are absent"
+  ],
+  "summary": "Setup wizard now warns when remote policy/trust refs are missing and coverage/docs/tasks were updated (SLT.ALPHA.016).",
+  "time": "05:33",
+  "topics": [
+    {
+      "context": "Initial bootstrap fails when hooks require refs",
+      "future_work": "Consider surfacing hook relaxations in config wizard plan JSON",
+      "issue": "Wizard gave no hint about SHIPLOG_ALLOW_MISSING_*",
+      "resolution": "Warn with explicit env vars when refs absent and auto-push disabled",
+      "time_percent": 50,
+      "topic": "Setup detection",
+      "what": "Added remote probe in git shiplog setup for policy/trust refs",
+      "why": "Backlog SLT.ALPHA.016 requested hook relaxation guidance"
+    },
+    {
+      "context": "test/15_setup_wizard.bats",
+      "future_work": "Add positive coverage for hook env already relaxed",
+      "issue": "No test exercised message output",
+      "resolution": "Adds bare origin harness and checks hint text",
+      "time_percent": 30,
+      "topic": "Regression coverage",
+      "what": "New Bats case asserts relaxed-hook hint and remote detection",
+      "why": "Prevent regressions in future setup changes"
+    },
+    {
+      "context": "docs/features/setup.md and progress bars",
+      "future_work": "Update runbook screenshots after next release",
+      "issue": "Server guidance lacked mention of new warning",
+      "resolution": "Updated docs, moved task to complete, regenerated progress",
+      "time_percent": 20,
+      "topic": "Docs & tasks",
+      "what": "Documented automatic hint and marked SLT.ALPHA.016 complete",
+      "why": "Keep docs/tasks aligned with implementation"
+    }
+  ]
+}

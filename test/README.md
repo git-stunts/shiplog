@@ -14,15 +14,16 @@ The `test/` directory contains the Bats-based integration suite that exercises t
 
 ## Test Runner
 
-- `make test` builds the local Docker image (if needed) and runs all Bats files with signing disabled. The image now bakes in your working tree snapshot, so the container executes `/usr/local/bin/run-tests` without bind-mounting your repo.
-- The `run-tests` entrypoint copies the baked snapshot to a temporary directory, strips any configured Git remotes, and sets `SHIPLOG_HOME` to that copy before executing Bats.
+- `make test` builds the local Docker image (if needed) and runs all Bats files with signing disabled. The image bakes a snapshot of your working tree into `/workspace` (`COPY . /workspace` in the `Dockerfile`), so a local `make test` runs `/usr/local/bin/run-tests` against that snapshot with nothing bind-mounted. CI (`.github/workflows/ci.yml`) runs the same image with the checkout bind-mounted over `/workspace` (`docker run -v "$PWD":/workspace`) so the container tests the exact commit under test.
+- The `run-tests` entrypoint copies `/workspace` (snapshot or mount) to a temporary directory, strips any configured Git remotes, and sets `SHIPLOG_HOME` to that copy before executing Bats.
 - Default test mode avoids network clones: `SHIPLOG_USE_LOCAL_SANDBOX=1` (set to `0` only if you explicitly need to hit the remote sandbox).
-- Tests run with an in-container timeout controlled by `TEST_TIMEOUT_SECS` (default `180`). Increase up to `360` when signing is enabled (`make test-signing`). Always capture container logs when a timeout occurs. Add `BATS_FLAGS` (e.g., `--print-output-on-failure -T`) for verbose runs.
+- Timeouts: the in-container entrypoint applies a timeout only when `TEST_TIMEOUT_SECS` is set to a positive integer (for example `TEST_TIMEOUT_SECS=180 make test`); when it is unset the run has no timeout. The legacy `test.sh` wrapper still defaults to `180`; [#132](https://github.com/git-stunts/shiplog/issues/132) unifies the two paths. Use a higher value when signing is enabled (`make test-signing`), and capture container logs when a timeout fires. Add `BATS_FLAGS` (e.g., `--print-output-on-failure -T`) for verbose runs.
 - `make test-signing` performs the same flow with `ENABLE_SIGNING=true`, generating a throw‑away GPG key inside the container to exercise signed‑commit verification.
 - The entrypoint installs `bin/git-shiplog` into `/usr/local/bin/git-shiplog` and exports `SHIPLOG_BOSUN_BIN`, then runs Bats (`bats -r`).
 - Each Bats file calls `load helpers/common`, whose `shiplog_install_cli` helper ensures the CLI is present and executable before tests begin.
 
 ## Adding or Updating Tests
+
 1. Create a new `*.bats` file or update an existing one under `test/`.
 2. Reuse shared setup logic via `load helpers/common` and environment variables (`SHIPLOG_*`) rather than duplicating installation code.
 3. Use the global `--yes` flag instead of piping `yes |` when a test needs to auto-confirm prompts.
@@ -52,7 +53,7 @@ The `test/` directory contains the Bats-based integration suite that exercises t
   - In non‑TTY, Bosun does not prompt; tests run with safe fallbacks.
 
 - Hanging or very slow tests
-  - Always run with the timeout guard: `TEST_TIMEOUT_SECS=180 BATS_FLAGS="--print-output-on-failure -T" make test` (raise to 360s when signing is enabled). Capture container logs if the timeout triggers.
+  - Opt in to the timeout guard: `TEST_TIMEOUT_SECS=180 BATS_FLAGS="--print-output-on-failure -T" make test` (raise it when signing is enabled). Capture container logs if the timeout triggers.
   - Local sandbox (no network clones) is default: `SHIPLOG_USE_LOCAL_SANDBOX=1` (set to `0` only if required).
 
 - “Signing support not enabled” or skipped signing tests

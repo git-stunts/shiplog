@@ -62,10 +62,8 @@ jobs:
               exit 0
             fi
             files='${{ steps.changed-shell.outputs.all_changed_files }}'
-            echo "Changed shell files (raw):
-$files"
-            mapfile -t SH_FILES < <(printf '%s
-' "$files")
+            printf 'Changed shell files (raw):\n%s\n' "$files"
+            mapfile -t SH_FILES < <(printf '%s\n' "$files")
             shellcheck -S error -s bash "${SH_FILES[@]}"
           else
             # On push (e.g., main), lint entire repo (include nested hooks)
@@ -134,7 +132,7 @@ $files"
             while IFS= read -r f; do
               case "$f" in
                 docs/tasks/README.md) filtered+=("$f") ;;
-                docs/tasks/*) ;; 
+                docs/tasks/*) ;;
                 *.md) filtered+=("$f") ;;
               esac
             done <<< "$files"
@@ -201,3 +199,31 @@ $files"
             exit 0
           fi
           ajv validate --spec=draft2020 -s examples/policy.schema.json -d "${files[@]}"
+
+  markdown_structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Code fences are balanced in every tracked Markdown file
+        run: scripts/dev/check-md-fences.sh
+      - name: Relative links resolve in every tracked Markdown file
+        run: scripts/dev/check-md-links.sh
+      - name: AGENTS.md holds instructions only
+        run: |
+          set -euo pipefail
+          logs=$(grep -cE '^\{"date"' AGENTS.md || true)
+          escapes=$(grep -c '\\n##' AGENTS.md || true)
+          size=$(wc -c < AGENTS.md | tr -d ' ')
+          echo "AGENTS.md: ${size} bytes, ${logs} session-log line(s), ${escapes} literal \\n heading(s)"
+          if [ "$logs" -ne 0 ]; then
+            echo "AGENTS.md contains raw session logs; move them to docs/notes/session-logs/" >&2
+            exit 1
+          fi
+          if [ "$escapes" -ne 0 ]; then
+            echo "AGENTS.md contains a literal \\n before a heading" >&2
+            exit 1
+          fi
+          if [ "$size" -ge 8192 ]; then
+            echo "AGENTS.md is ${size} bytes; keep it under 8192" >&2
+            exit 1
+          fi

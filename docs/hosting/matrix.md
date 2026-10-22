@@ -52,6 +52,7 @@ This page summarizes what you can (and cannot) enforce on common Git hosts for S
 ## What to Enforce
 
 Whether in hooks or CI checks, enforce:
+
 - Fast-forward only (Shiplog journals and trust/policy updates)
 - Trust:
   - sig_mode=chain: at least `threshold` distinct maintainer-signed commits over the same trust tree
@@ -65,4 +66,4 @@ Whether in hooks or CI checks, enforce:
 - Hook: [`contrib/hooks/pre-receive.shiplog`](../../contrib/hooks/pre-receive.shiplog)
 - Verifier: [`scripts/shiplog-verify-trust.sh`](../../scripts/shiplog-verify-trust.sh)
 - GitHub workflow: [`docs/examples/github/workflow-shiplog-trust-verify.yml`](../examples/github/workflow-shiplog-trust-verify.yml)
-- Setup: [`git shiplog setup --trust-sig-mode {chain|attestation}`](../cli/setup.md)
+- Setup: [`git shiplog setup --trust-sig-mode {chain|attestation}`](../features/setup.md)
