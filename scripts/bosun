@@ -81,11 +81,19 @@ show_doc() {
 }
 
 # ---- TTY & Color ------------------------------------------------------------
+# Interactive when stdin is a terminal and at least one of stdout/stderr is.
+# Callers capture stdout with $(...), which turns fd 1 into a pipe; stderr is
+# still the terminal, so prompts render there and the answer alone goes to
+# stdout. BOSUN_FORCE_TTY=1 overrides the probe (tests, odd terminals).
 is_tty() {
   if [ "${BOSUN_FORCE_TTY:-0}" = "1" ]; then
     return 0
   fi
-  [ -t 0 ] && [ -t 1 ]
+  [ -t 0 ] && { [ -t 1 ] || [ -t 2 ]; }
+}
+# Prompt text goes to stderr so that captured stdout contains only the answer.
+prompt_out() {
+  printf '%s' "$*" >&2
 }
 ansi() {
   local on="${BOSUN_NO_COLOR:-0}"
@@ -101,7 +109,9 @@ json_escape() {
   data=$(cat)
   if command -v jq >/dev/null 2>&1; then
     local enc
-    enc=$(printf '%s' "$data" | jq -Rs @json 2>/dev/null || true)
+    # `-Rs .` prints the raw input as one JSON string literal (quotes
+    # included); `@json` here would encode it a second time.
+    enc=$(printf '%s' "$data" | jq -Rs . 2>/dev/null || true)
     if [ -n "$enc" ]; then
       if [ "${enc:0:1}" = '"' ]; then
         enc=${enc#?}
@@ -184,17 +194,20 @@ cmd_confirm() {
   if ! is_tty; then
     if [ "$def_yes" -eq 1 ]; then
       [ "$json" -eq 1 ] && emit_json_kv ok true || echo "yes"; return 0
-    else
-      [ "$json" -eq 1 ] && emit_json_kv ok false || echo "no"; return 1
     fi
+    # Exit 2: no terminal to ask on. Distinct from "no" (exit 1) so callers
+    # can fall back to their own prompt only when bosun could not ask.
+    [ "$json" -eq 1 ] && printf '{"ok":null}\n'
+    echo "bosun confirm: no terminal available to prompt (pass --yes or --default-yes)" >&2
+    return 2
   fi
   local hint="[y/N]"; [ "$def_yes" -eq 1 ] && hint="[Y/n]"
   local prompt_col
   prompt_col=$(color '1;36' "$prompt $hint ")
-  printf '%s' "$prompt_col"
+  prompt_out "$prompt_col"
   local ans=""
   IFS= read -r -n 1 ans || true
-  printf '\n'
+  prompt_out $'\n'
   case "$(printf '%s' "$ans" | tr '[:upper:]' '[:lower:]')" in
     y) [ "$json" -eq 1 ] && emit_json_kv ok true || echo "yes"; return 0 ;;
     n) [ "$json" -eq 1 ] && emit_json_kv ok false || echo "no"; return 1 ;;
@@ -220,8 +233,8 @@ cmd_input() {
   if is_tty; then
     local prompt_col
     prompt_col=$(color '1;33' "$prompt ")
-    printf '%s' "$prompt_col"
-    read -r out || true
+    prompt_out "$prompt_col"
+    IFS= read -r out || true
   else
     # Non-interactive: avoid blocking when stdin is not a pipe or has no data
     if [ -p /dev/stdin ]; then
@@ -260,20 +273,20 @@ cmd_choose() {
   if [ -n "$header" ]; then
     local header_col
     header_col=$(color '1;36' "$header")
-    echo "$header_col"
+    prompt_out "$header_col"$'\n'
   fi
   local i=1 o
   for o in "${opts[@]}"; do
     local option_idx
     option_idx=$(color '1;35' "$i")
-    printf "  %s) %s\n" "$option_idx" "$o"
+    prompt_out "$(printf '  %s) %s' "$option_idx" "$o")"$'\n'
     i=$((i+1))
   done
   local sel
   local prompt_arrow
   prompt_arrow=$(color '1;33' '> ')
-  printf '%s' "$prompt_arrow"
-  read -r sel || true
+  prompt_out "$prompt_arrow"
+  IFS= read -r sel || true
   if [[ "$sel" =~ ^[1-9][0-9]*$|^[1-9]$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le ${#opts[@]} ]; then
     local pick="${opts[$((sel-1))]}"
     [ "$json" -eq 1 ] && emit_json_kv value "$pick" || echo "$pick"
@@ -300,6 +313,26 @@ cmd_style() {
   draw_box "$title_col" "$text"
 }
 
+# split_on CHAR STRING — split STRING on every single CHAR into the global
+# array split_result. Unlike `IFS=CHAR read -a`, consecutive, leading and
+# trailing separators each yield an empty field, so empty cells survive.
+split_on() {
+  local sep="$1" rest="$2"
+  split_result=()
+  while :; do
+    case "$rest" in
+      *"$sep"*)
+        split_result+=("${rest%%"$sep"*}")
+        rest="${rest#*"$sep"}"
+        ;;
+      *)
+        split_result+=("$rest")
+        break
+        ;;
+    esac
+  done
+}
+
 cmd_table() {
   local columns_arg="" rows_file=""
   while [ $# -gt 0 ]; do
@@ -307,7 +340,6 @@ cmd_table() {
       --columns) columns_arg="$2"; shift ;;
       --rows-file) rows_file="$2"; shift ;;
       --no-color) BOSUN_NO_COLOR=1 ;;
-      --width) BOSUN_WIDTH="$2"; shift ;;
       --) shift; break ;;
       *) break ;;
     esac; shift
@@ -316,8 +348,7 @@ cmd_table() {
 
   local headers=()
   local h
-  local IFS=','
-  read -r -a headers <<< "$columns_arg"
+  IFS=',' read -r -a headers <<< "$columns_arg"
   local canonical_headers=()
   for h in "${headers[@]}"; do
     local trimmed
@@ -348,14 +379,13 @@ cmd_table() {
     widths[$idx]=${#headers[$idx]}
   done
 
-  local row
   local SEP=$'\x1F'
   local -a parsed_rows=()
+  local -a split_result=()
   local row
   for row in "${rows[@]}"; do
     [ -n "$row" ] || continue
-    local IFS=$'\t'
-    read -r -a split_result <<< "$row"
+    split_on $'\t' "$row"
     if [ ${#split_result[@]} -ne ${#headers[@]} ]; then
       echo "bosun table: row has ${#split_result[@]} columns but expected ${#headers[@]}" >&2
       return 3
@@ -390,9 +420,9 @@ cmd_table() {
   done
   printf '\n'
 
+  local entry
   for entry in "${parsed_rows[@]}"; do
-    local IFS=$'\x1F'
-    read -r -a split_result <<< "$entry"
+    split_on "$SEP" "$entry"
     for idx in "${!split_result[@]}"; do
       printf '%-*s' "${widths[$idx]}" "${split_result[$idx]}"
       [ "$idx" -lt $((${#split_result[@]}-1)) ] && printf '  '
@@ -426,10 +456,12 @@ cmd_spin() {
     return $?
   fi
   trap 'kill $pid 2>/dev/null || true' INT TERM
+  # Spinner frames are progress output: render on stderr so a captured stdout
+  # carries only the wrapped command's output.
   while kill -0 "$pid" 2>/dev/null; do
     local frame_col
     frame_col=$(color '1;36' "${frames:i:1}")
-    printf '\r%s %s' "$frame_col" "$title"
+    printf '\r%s %s' "$frame_col" "$title" >&2
     i=$(( (i + 1) % ${#frames} ))
     sleep 0.1
   done
@@ -441,7 +473,7 @@ cmd_spin() {
   else
     glyph=$(color '1;31' '✖')
   fi
-  printf "\r%s %s\n" "$glyph" "$title"
+  printf "\r%s %s\n" "$glyph" "$title" >&2
   return "$rc"
 }
 
@@ -453,12 +485,12 @@ bosun — bash-only TUI helpers
 Usage:
   bosun help [command]
   bosun --version
-  bosun confirm [--yes] [--json] [--no-color] "Prompt"
-  bosun input [--placeholder P] [--value V] [--json]
-  bosun choose [--header H] [--default OPT] [--json] OPT1 OPT2 …
+  bosun confirm [--yes] [--default-yes] [--json] [--no-color] "Prompt"
+  bosun input [--placeholder P] [--value V] [--json] [--no-color]
+  bosun choose [--header H] [--default OPT] [--json] [--no-color] OPT1 OPT2 …
   bosun style [--title T] [--width N] [--no-color] -- "text"
-  bosun table --columns "Col1,Col2" [--rows-file file.tsv]
-  bosun spin --title "Doing X" -- <command>
+  bosun table --columns "Col1,Col2" [--rows-file file.tsv] [--no-color]
+  bosun spin --title "Doing X" [--no-color] -- <command>
 
 Run "bosun help <command>" to see detailed documentation.
 EOF

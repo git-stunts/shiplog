@@ -23,6 +23,7 @@ The `test/` directory contains the Bats-based integration suite that exercises t
 - Each Bats file calls `load helpers/common`, whose `shiplog_install_cli` helper ensures the CLI is present and executable before tests begin.
 
 ## Adding or Updating Tests
+
 1. Create a new `*.bats` file or update an existing one under `test/`.
 2. Reuse shared setup logic via `load helpers/common` and environment variables (`SHIPLOG_*`) rather than duplicating installation code.
 3. Use the global `--yes` flag instead of piping `yes |` when a test needs to auto-confirm prompts.
@@ -49,7 +50,12 @@ The `test/` directory contains the Bats-based integration suite that exercises t
 
 - Bosun UI issues or unexpected colors
   - Force plain mode: `SHIPLOG_BORING=1 git shiplog <cmd>`
-  - In non‑TTY, Bosun does not prompt; tests run with safe fallbacks.
+  - In non‑TTY, Bosun does not prompt; tests run with safe fallbacks. `bosun confirm` exits 2 ("cannot prompt") without a terminal, so `shiplog_confirm` falls back to its plain `[y/N]` prompt and reads stdin; use `--yes` to skip confirmation entirely.
+
+- Bosun prompt tests (`test/28_bosun_prompts.bats`)
+  - Bosun treats a session as interactive when stdin is a terminal and stdout *or* stderr is a terminal; prompts are drawn on stderr so `$(bosun …)` captures only the answer.
+  - The pty cases run bosun under util-linux `script -q -c … /dev/null` so stdin is a real terminal while stdout is captured. They `skip` when `script` is absent (the default `ubuntu:24.04` image ships it in `bsdutils`; some matrix images may not).
+  - Manual check, in a real terminal with bosun on `PATH` and no `--yes`: run `git shiplog write` in a sandbox repo. Expected: each field prompts (`service (e.g., web)` etc.) on the terminal, typed values appear in the Preview box, and `Sign & append …? [y/N]` answered `n` prints `Aborted.` without creating a journal commit. Capturing stdout (`out=$(git shiplog write)`) must still prompt.
 
 - Hanging or very slow tests
   - Always run with the timeout guard: `TEST_TIMEOUT_SECS=180 BATS_FLAGS="--print-output-on-failure -T" make test` (raise to 360s when signing is enabled). Capture container logs if the timeout triggers.

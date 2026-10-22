@@ -143,6 +143,13 @@ $files"
             markdownlint "${filtered[@]}"
           fi
 
+  bosun_docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/bosun flags match scripts/bosun
+        run: scripts/dev/check-bosun-docs.sh
+
   yamllint:
     runs-on: ubuntu-latest
     steps:

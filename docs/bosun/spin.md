@@ -9,7 +9,7 @@ bosun spin [--title TEXT] [--no-color] -- <command> [args...]
 - `--title` text is displayed next to the spinner while the command runs.
 - `--no-color` removes ANSI styling.
 
-The spinner only appears when stdout is a TTY; in pipelines or CI the command executes normally without animation.
+The spinner is drawn on stderr and only when Bosun is interactive (stdin is a terminal and stdout or stderr is a terminal; see `bosun help overview`). In pipelines or CI the command executes normally without animation. The wrapped command's own stdout and stderr pass through untouched.
 
 Examples:
 
