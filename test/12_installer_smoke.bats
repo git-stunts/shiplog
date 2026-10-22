@@ -398,8 +398,13 @@ make_restricted_path() {
 }
 
 @test "git shiplog refs migrate --dry-run runs the migration helper (#105)" {
-  git update-ref refs/_shiplog/journal/smoke HEAD
+  # Directly under the root: the helper's for-each-ref pattern "<root>/*" does
+  # not descend into journal/<env> (tracked for the G6 ref-root work).
+  git update-ref refs/_shiplog/smoke HEAD
   run git shiplog refs migrate --to refs/heads/_shiplog --dry-run
   [ "$status" -eq 0 ]
+  [[ "$output" == *"refs/_shiplog/smoke -> refs/heads/_shiplog/smoke"* ]]
   [[ "$output" == *"Dry-run"* ]]
+  run git show-ref --verify --quiet refs/heads/_shiplog/smoke
+  [ "$status" -ne 0 ]
 }
