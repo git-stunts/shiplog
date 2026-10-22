@@ -46,8 +46,10 @@ if ! command -v bats >/dev/null 2>&1; then
 fi
 
 timeout_enabled=0
-use_timeout "$TEST_TIMEOUT_SECS"
-timeout_status=$?
+# use_timeout returns 1 for "no timeout" (the default); capture that without
+# tripping errexit.
+timeout_status=0
+use_timeout "$TEST_TIMEOUT_SECS" || timeout_status=$?
 case "$timeout_status" in
   0) timeout_enabled=1 ;;
   1) timeout_enabled=0 ;;
