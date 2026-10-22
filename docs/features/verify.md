@@ -28,4 +28,4 @@ git shiplog verify [ENV] [--allow-empty]
 - `test/05_verify_authors.bats:22`
 - `test/05_verify_authors.bats:28`
 - `test/06_verify_signatures_signed_build.bats:18`
-- `test/32_cli_parsing.bats` (missing journal, extra arguments, unknown flags)
+- `test/38_cli_parsing.bats` (missing journal, extra arguments, unknown flags)

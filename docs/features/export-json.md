@@ -32,4 +32,4 @@ git shiplog export-json prod --lenient | jq -c 'select(.error) | {commit, subjec
 
 ## Tests
 - `test/03_export_json_ndjson.bats:11`
-- `test/32_cli_parsing.bats` (malformed trailers, exit 3, `--lenient`, missing journal)
+- `test/38_cli_parsing.bats` (malformed trailers, exit 3, `--lenient`, missing journal)
