@@ -29,9 +29,10 @@ scripts/roadmap-check.sh --update   # also update #155 (needs gh auth)
 - [ ] G6: One ref root — every ref, client and server
 - [ ] G7: Ledger and CLI correctness — the long tail
 - [ ] G8: CI, tests and docs tell the truth
-- [ ] G9: Release 0.5.0 — README claims restored and proven
+- [ ] G9: Shiplog ships Shiplog — this repo records its own CI runs and releases
+- [ ] G10: Release 0.5.0 — README claims restored and proven
 
-Sequence: G1 → G2 → G3 → G4. Then G5 and G6 in parallel. Then G7 and G8 in parallel. G9 last. A later goal must not start its PR review before the earlier goal is green on #155, except where noted.
+Sequence: G1 → G2 → G3 → G4. Then G5 and G6 in parallel. Then G7 and G8 in parallel. G9 after G3 and G6. G10 last. A later goal must not start its PR review before the earlier goal is green on #155, except where noted.
 
 ---
 
@@ -297,7 +298,32 @@ Out: README rewrite (own PR) and release notes (G9).
 
 ---
 
-## G9: Release 0.5.0
+## G9: Shiplog ships Shiplog
+
+A deployment ledger that does not log its own deployments is a demo, not a tool. This repository records its own CI runs and releases with Shiplog, on GitHub.com, under the branch namespace — which also exercises the SaaS enforcement path (rulesets + `verify` as a required check) for real. Tracked in #163.
+
+### Scope
+
+In: `.shiplog/policy.json` for this repo; policy and trust published under `refs/heads/_shiplog/**`; `ci.yml` records each `main` run to `refs/heads/_shiplog/journal/ci` and runs `git shiplog verify ci` as a required PR check; the release workflow records signed `release` entries; README links the live ledger; ruleset import documented.
+Out: product code. Requires G3 and G6.
+
+### Definition of done (checks)
+
+- `issues-closed:163`
+- `grep:.github/workflows/ci.yml:git shiplog run`
+- `grep:.github/workflows/ci.yml:git shiplog verify`
+- `file:.shiplog/policy.json`
+- `exec:git ls-remote --exit-code origin refs/heads/_shiplog/journal/ci`
+- `grep:README.md:journal/ci`
+- `ci-main-green:ci.yml`
+
+### Tasks
+
+- [ ] #163 Record CI runs and releases; verify as required check; README link; ruleset docs
+
+---
+
+## G10: Release 0.5.0
 
 Ship it. The README may claim "cryptographically signed, append-only, N-of-M approved" only because `test/27_trust_adversarial.bats` is blocking and green.
 
