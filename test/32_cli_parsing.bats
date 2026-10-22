@@ -56,10 +56,16 @@ line_count() {
 }
 
 @test "g7b help: global --help before the command still prints the global usage" {
-  run git shiplog --help
+  # `git shiplog --help` never reaches the script: Git rewrites `git <cmd> --help`
+  # into `git help <cmd>` (a man page lookup). Call the binary directly for that
+  # spelling; `-h` is not intercepted by Git.
+  run git-shiplog --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Global Options:"* ]]
   run git shiplog -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Global Options:"* ]]
+  run git shiplog --boring --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Global Options:"* ]]
   # `--` before the command only ends global flag parsing
@@ -106,7 +112,7 @@ line_count() {
 
 @test "g7b write: invalid environment names are rejected" {
   local bad
-  for bad in 'bad env' 'a..b' '-leading' 'trailing.lock' 'with~tilde'; do
+  for bad in 'bad env' 'a..b' 'trailing.lock' 'with~tilde' 'slash/'; do
     run git shiplog write "$bad"
     if [ "$status" -eq 0 ]; then
       echo "write accepted env '$bad'" >&2
@@ -114,6 +120,14 @@ line_count() {
     fi
     [[ "$output" == *"invalid environment name"* ]]
   done
+  # A leading dash is caught by the flag parser first (unknown option), and the
+  # validator rejects it as an env name when it arrives through --env.
+  run git shiplog write -leading
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown write option: -leading"* ]]
+  run git shiplog write --env=-leading
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid environment name '-leading'"* ]]
   run git for-each-ref "${REF_ROOT}/journal/" --format='%(refname)'
   [ -z "$output" ]
 }
