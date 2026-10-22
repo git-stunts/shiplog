@@ -70,6 +70,9 @@ JSON
   git config user.name "Shiplog Tester"
   git config user.email "shiplog-tester@example.com"
   export SHIPLOG_AUTO_PUSH=0
+  # Unsigned policy fixture; the maintainer-signature gate on policy pushes
+  # (SLT.BUG.TRUST.009) is relaxed explicitly so these cases test journal signing.
+  export SHIPLOG_REQUIRE_SIGNED_POLICY=0
 
   REMOTE_DIR=$(mktemp -d)
   git init --bare "$REMOTE_DIR"

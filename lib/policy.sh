@@ -11,7 +11,11 @@ extract_policy_fields() {
   local src="$1" env="$2"
   jq -r --arg env "$env" '
     {
-      require_signed: (.deployment_requirements[$env].require_signed // .require_signed),
+      require_signed: (
+        if (.deployment_requirements[$env] | type == "object" and has("require_signed"))
+        then .deployment_requirements[$env].require_signed
+        else .require_signed
+        end),
       allowed_signers_file: .allow_ssh_signers_file,
       notes_ref: .notes_ref,
       journals_prefix: .journals_ref_prefix,

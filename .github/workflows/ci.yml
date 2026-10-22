@@ -62,3 +62,43 @@ jobs:
             test/**/*.log
             ci-logs/*.log
           if-no-files-found: ignore
+
+  # ROADMAP G2/G3: adversarial trust suite. Runs only test/27_trust_adversarial.bats
+  # (selected by its `# bats file_tags=adversarial` marker). Blocking since G3
+  # landed the trust verification rewrite (lib/trust-verify.sh).
+  adversarial:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{runner.os}}-buildx-false-${{github.sha}}
+          restore-keys: |
+            ${{runner.os}}-buildx-false-
+            ${{runner.os}}-buildx-
+
+      - name: Build test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: shiplog-tests:ci
+          build-args: |
+            ENABLE_SIGNING=false
+          cache-from: type=local,src=/tmp/.buildx-cache
+
+      - name: Run adversarial trust suite in container (blocking)
+        run: |
+          docker run --rm \
+            -e BATS_FLAGS='--filter-tags adversarial -r' \
+            -e TEST_TIMEOUT_SECS=900 \
+            -v "$PWD":/workspace shiplog-tests:ci

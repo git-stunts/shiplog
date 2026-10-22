@@ -63,4 +63,5 @@ Missing fields inherit from the `default` entry when present.
 - If `require_signed` is `true`, ensure `allow_ssh_signers_file` exists and is readable by automation.
 - Keep semantic versioning consistent to signal breaking policy format changes.
 - Before committing or publishing `.shiplog/policy.json`, run `scripts/policy/validate.sh` or `git shiplog policy validate`.
+- Once a trust ref exists on the server, the pre-receive hook accepts a policy update only when the commit is signed by a current maintainer of the trust roster, contains `.shiplog/policy.json`, and passes the validator (`SHIPLOG_REQUIRE_SIGNED_POLICY`; see `docs/TRUST.md`). Publish with `SHIPLOG_POLICY_SIGN=1 scripts/shiplog-sync-policy.sh`.
 - The validator enforces canonical semver versions and optional-field rules defined in `scripts/lib/policy_validate.jq`, so failing locally prevents broken pushes.

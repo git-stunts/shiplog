@@ -5,31 +5,46 @@ JQ_BIN="${SHIPLOG_JQ_BIN:-/usr/local/bin/jq}"
 TRUST_REF="${SHIPLOG_TRUST_REF:-refs/_shiplog/trust/root}"
 POLICY_REF="${SHIPLOG_POLICY_REF:-refs/_shiplog/policy/current}"
 REQUIRE_SEPARATE_SIGNERS="${SHIPLOG_REQUIRE_SEPARATE_SIGNERS:-1}"
+export SHIPLOG_REQUIRE_SEPARATE_SIGNERS="$REQUIRE_SEPARATE_SIGNERS"
 # Optional relaxations: allow missing trust/policy when signatures are not required.
 # Defaults keep strict behavior for CI/tests.
 ALLOW_MISSING_TRUST="${SHIPLOG_ALLOW_MISSING_TRUST:-0}"
 ALLOW_MISSING_POLICY="${SHIPLOG_ALLOW_MISSING_POLICY:-0}"
+# Emergency escape hatch: allow deletion of Shiplog refs (logs a warning).
+ALLOW_REF_DELETE="${SHIPLOG_ALLOW_REF_DELETE:-0}"
+ZERO_OID="0000000000000000000000000000000000000000"
 HOOK_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# SECURITY WARNING: HOOK_DIR, POLICY_VALIDATOR_BIN, and POLICY_VALIDATOR_FILTER
-# influence server-side execution. Only trusted administrators on the receiving
-# host may set SHIPLOG_POLICY_VALIDATE_BIN or SHIPLOG_POLICY_VALIDATOR; untrusted
-# overrides can lead to arbitrary command execution. Deployments should leave
-# these unset or pin them via configuration management.
+
+# Git hands pre-receive a relative GIT_DIR ("."). Make it absolute once so every
+# git invocation below, and anything we exec, works regardless of cwd.
+if GIT_DIR_ABS=$(git rev-parse --absolute-git-dir 2>/dev/null) && [ -n "$GIT_DIR_ABS" ]; then
+  export GIT_DIR="$GIT_DIR_ABS"
+fi
+
+# SECURITY WARNING: HOOK_DIR, SHIPLOG_HOME, POLICY_VALIDATOR_BIN, POLICY_VALIDATOR_FILTER,
+# SHIPLOG_TRUST_VERIFY_LIB and SHIPLOG_VERIFY_TRUST_BIN influence server-side
+# execution. Only trusted administrators on the receiving host may set them;
+# untrusted overrides can lead to arbitrary command execution. Deployments
+# should pin them via configuration management.
 POLICY_VALIDATOR_BIN="${SHIPLOG_POLICY_VALIDATE_BIN:-}"
 POLICY_VALIDATOR_FILTER="${SHIPLOG_POLICY_VALIDATOR:-}"
+TRUST_VERIFY_LIB_OVERRIDE="${SHIPLOG_TRUST_VERIFY_LIB:-}"
+TRUST_VERIFY_BIN_OVERRIDE="${SHIPLOG_VERIFY_TRUST_BIN:-}"
 # Canonical jq filter lives at scripts/lib/policy_validate.jq.
+#
+# SAFE_PREFIXES is the execution boundary: only files beneath one of these
+# directories (and not group/world writable) are ever sourced or executed.
+#   - SHIPLOG_HOME: the Shiplog checkout installed on this server (recommended;
+#     set it in the hook environment).
+#   - HOOK_DIR and its parent (the bare repository directory): for admins who
+#     copy lib/ next to hooks/. The parent of the repository directory is NOT a
+#     safe prefix; it is shared by every repository on the host.
 SAFE_PREFIXES=()
 if [ -n "${SHIPLOG_HOME:-}" ]; then
   SAFE_PREFIXES+=("${SHIPLOG_HOME}")
-  SAFE_PREFIXES+=("${SHIPLOG_HOME}/scripts")
-  SAFE_PREFIXES+=("${SHIPLOG_HOME}/scripts/lib")
 fi
 SAFE_PREFIXES+=("$HOOK_DIR")
 SAFE_PREFIXES+=("$HOOK_DIR/..")
-SAFE_PREFIXES+=("$HOOK_DIR/../..")
-SAFE_PREFIXES+=("$HOOK_DIR/../lib")
-SAFE_PREFIXES+=("$HOOK_DIR/../../scripts")
-SAFE_PREFIXES+=("$HOOK_DIR/../../scripts/lib")
 
 canonicalize_path() {
   local target="$1"
@@ -143,6 +158,23 @@ path_is_safe() {
   return 0
 }
 
+error() {
+  echo "❌ shiplog: $*" >&2
+  exit 1
+}
+
+warn() {
+  echo "⚠️  shiplog: WARNING: $*" >&2
+}
+
+debug_enabled() {
+  case "$(printf '%s' "${SHIPLOG_DEBUG_SSH_VERIFY:-0}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+dbg() { debug_enabled && echo "shiplog[debug]: $*" >&2 || true; }
+
 if ! command -v "$JQ_BIN" >/dev/null 2>&1; then
   if command -v jq >/dev/null 2>&1; then
     JQ_BIN="$(command -v jq)"
@@ -159,6 +191,47 @@ CURRENT_TRUST_TIP=""
 CURRENT_TRUST_JSON=""
 CURRENT_POLICY_JSON=""
 
+# --- Shared trust verification module -------------------------------------
+# The hook is copied to servers alone, so it locates lib/trust-verify.sh
+# through the same SAFE_PREFIXES discipline as the policy validator and fails
+# closed when the module cannot be found or is not safe to source.
+find_trust_verify_lib() {
+  local candidate canonical
+  if [ -n "$TRUST_VERIFY_LIB_OVERRIDE" ]; then
+    candidate="$TRUST_VERIFY_LIB_OVERRIDE"
+    [ -f "$candidate" ] || error "SHIPLOG_TRUST_VERIFY_LIB does not exist: $candidate"
+    canonical=$(canonicalize_path "$candidate") || error "SHIPLOG_TRUST_VERIFY_LIB cannot be resolved: $candidate"
+    path_is_safe "$canonical" || error "refusing to source SHIPLOG_TRUST_VERIFY_LIB outside SAFE_PREFIXES or group/world writable: $candidate"
+    printf '%s' "$canonical"
+    return 0
+  fi
+  local candidates=(
+    "${SHIPLOG_HOME:+$SHIPLOG_HOME/lib/trust-verify.sh}"
+    "$HOOK_DIR/../lib/trust-verify.sh"
+  )
+  for candidate in "${candidates[@]}"; do
+    [ -n "$candidate" ] || continue
+    [ -f "$candidate" ] || continue
+    canonical=$(canonicalize_path "$candidate") || continue
+    if ! path_is_safe "$canonical"; then
+      warn "ignoring unsafe trust-verify module candidate: $candidate"
+      continue
+    fi
+    printf '%s' "$canonical"
+    return 0
+  done
+  return 1
+}
+
+if ! TRUST_VERIFY_LIB_PATH=$(find_trust_verify_lib); then
+  error "shared trust verification module lib/trust-verify.sh not found; set SHIPLOG_HOME to the Shiplog checkout on this server (or SHIPLOG_TRUST_VERIFY_LIB to the module path)"
+fi
+# shellcheck source=../../lib/trust-verify.sh
+. "$TRUST_VERIFY_LIB_PATH"
+TRUST_VERIFY_TMP="$TMP_ROOT"
+dbg "trust: using shared verifier lib/trust-verify.sh at $TRUST_VERIFY_LIB_PATH"
+
+# --- Policy validator discovery -------------------------------------------
 find_policy_validator_bin() {
   local log_unsafe=${1:-}
   local candidates=(
@@ -228,12 +301,14 @@ ensure_policy_validator_filter() {
 # - POLICY_VALIDATOR_BIN / POLICY_VALIDATOR_FILTER overrides are accepted only
 #   from trusted administrators and are rejected when unsafe.
 # - jq/script failures abort the hook to avoid publishing inconsistent policy.
+# - Exit codes are captured with `status=0; out=$(...) || status=$?` so errexit
+#   cannot swallow the diagnostics before they are printed.
 run_policy_validator() {
   local json="$1"
   local validator output status filter
   if validator=$(find_policy_validator_bin log); then
-    output=$(printf '%s\n' "$json" | "$validator" --stdin 2>&1)
-    status=$?
+    status=0
+    output=$(printf '%s\n' "$json" | "$validator" --stdin 2>&1) || status=$?
     if [ "$status" -eq 0 ]; then
       return 0
     elif [ "$status" -eq 1 ]; then
@@ -253,8 +328,8 @@ run_policy_validator() {
   if ! filter=$(ensure_policy_validator_filter); then
     error "policy validator filter not found; expected scripts/lib/policy_validate.jq"
   fi
-  output=$(printf '%s\n' "$json" | "$JQ_BIN" -r -f "$filter" 2>&1)
-  status=$?
+  status=0
+  output=$(printf '%s\n' "$json" | "$JQ_BIN" -r -f "$filter" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     if [ -n "$output" ]; then
       printf '%s\n' "$output" >&2
@@ -269,46 +344,20 @@ run_policy_validator() {
   fi
 }
 
-error() {
-  echo "❌ shiplog: $*" >&2
-  exit 1
-}
-
-debug_enabled() {
-  case "$(printf '%s' "${SHIPLOG_DEBUG_SSH_VERIFY:-0}" | tr '[:upper:]' '[:lower:]')" in
-    1|true|yes|on) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-dbg() { debug_enabled && echo "shiplog[debug]: $*" >&2 || true; }
-
+# --- Current server state --------------------------------------------------
 load_trust_state() {
   local commit="$1"
   [ -n "$commit" ] || return 0
   CURRENT_TRUST_TIP="$commit"
-  CURRENT_TRUST_JSON=$(git show "$commit:trust.json" 2>/dev/null || true)
-  [ -n "$CURRENT_TRUST_JSON" ] || error "trust ref $TRUST_REF is missing trust.json"
-  "$JQ_BIN" -e '
-    .version == 1 and
-    (.threshold | type == "number" and . >= 1) and
-    (.maintainers | type == "array" and length >= 1)
-  ' <<<"$CURRENT_TRUST_JSON" >/dev/null 2>&1 || error "trust.json failed validation"
-
-  local signers_blob
-  signers_blob=$(git show "$commit:allowed_signers" 2>/dev/null || true)
-  if [ "$REQUIRE_SEPARATE_SIGNERS" = "1" ]; then
-    [ -n "$signers_blob" ] || error "trust ref $TRUST_REF missing allowed_signers"
-  fi
-  if [ -n "$signers_blob" ]; then
-    SIGNERS_FILE="$TMP_ROOT/allowed_signers"
-    printf '%s' "$signers_blob" > "$SIGNERS_FILE"
-    chmod 600 "$SIGNERS_FILE"
-    if debug_enabled; then
-      principals=$(awk '{print $1}' "$SIGNERS_FILE" | paste -sd, -)
-      dbg "allowed_signers principals=[${principals}]"
-    fi
-  else
+  trust_verify_load_trust_json "$commit" "$TRUST_REF" || exit 1
+  CURRENT_TRUST_JSON="$TV_TRUST_JSON"
+  SIGNERS_FILE="$TMP_ROOT/allowed_signers"
+  if ! trust_verify_write_signers "$commit" "$SIGNERS_FILE"; then
+    rm -f "$SIGNERS_FILE"
     SIGNERS_FILE=""
+    if [ "$REQUIRE_SEPARATE_SIGNERS" = "1" ]; then
+      error "trust ref $TRUST_REF missing allowed_signers"
+    fi
   fi
 }
 
@@ -320,10 +369,15 @@ load_policy_state() {
   run_policy_validator "$CURRENT_POLICY_JSON"
 }
 
-
 get_policy_require_signed() {
   local env="$1"
-  "$JQ_BIN" -r --arg env "$env" '(.deployment_requirements[$env].require_signed // .require_signed // false) | tostring' <<<"$CURRENT_POLICY_JSON"
+  # Explicit has() check: a per-environment `false` must override a global `true`
+  # (jq's // operator would treat false as absent).
+  "$JQ_BIN" -r --arg env "$env" '
+    if (.deployment_requirements[$env] | type == "object" and has("require_signed"))
+    then .deployment_requirements[$env].require_signed
+    else (.require_signed // false)
+    end | tostring' <<<"$CURRENT_POLICY_JSON"
 }
 
 get_policy_authors() {
@@ -352,174 +406,98 @@ get_policy_authors() {
 
 ensure_fast_forward() {
   local old="$1" new="$2" ref="$3"
-  if [ "$old" = "0000000000000000000000000000000000000000" ]; then
+  if [ "$old" = "$ZERO_OID" ]; then
     return 0
   fi
   git merge-base --is-ancestor "$old" "$new" >/dev/null 2>&1 || error "$ref is not a fast-forward update"
 }
 
+# --- Trust ref -------------------------------------------------------------
+# The shared verifier script (scripts/shiplog-verify-trust.sh) and the sourced
+# module implement the same rules; the script is preferred when it is installed
+# under a safe prefix so CI required checks and the server run identical code.
+# Discovery: SHIPLOG_VERIFY_TRUST_BIN (admin pin; must be safe or the push is
+# refused), then $SHIPLOG_HOME/scripts/shiplog-verify-trust.sh. Never
+# "$GIT_DIR/.." or the parent of the repository.
+# Sets TRUST_VERIFIER_BIN (empty when no script is available). Runs in the main
+# shell on purpose: a refused SHIPLOG_VERIFY_TRUST_BIN must abort the push, not
+# fall through to another code path.
+TRUST_VERIFIER_BIN=""
+resolve_trust_verifier_bin() {
+  local candidate canonical
+  TRUST_VERIFIER_BIN=""
+  if [ -n "$TRUST_VERIFY_BIN_OVERRIDE" ]; then
+    candidate="$TRUST_VERIFY_BIN_OVERRIDE"
+    if [ ! -f "$candidate" ] || [ ! -x "$candidate" ]; then
+      error "SHIPLOG_VERIFY_TRUST_BIN is not an executable file: $candidate"
+    fi
+    canonical=$(canonicalize_path "$candidate") || error "SHIPLOG_VERIFY_TRUST_BIN cannot be resolved: $candidate"
+    path_is_safe "$canonical" || error "refusing to run SHIPLOG_VERIFY_TRUST_BIN outside SAFE_PREFIXES or group/world writable: $candidate"
+    TRUST_VERIFIER_BIN="$canonical"
+    return 0
+  fi
+  if [ -n "${SHIPLOG_HOME:-}" ]; then
+    candidate="$SHIPLOG_HOME/scripts/shiplog-verify-trust.sh"
+    if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+      if canonical=$(canonicalize_path "$candidate") && path_is_safe "$canonical"; then
+        TRUST_VERIFIER_BIN="$canonical"
+        return 0
+      fi
+      warn "ignoring unsafe shared verifier candidate (group/world writable or outside SAFE_PREFIXES): $candidate"
+    fi
+  fi
+  return 0
+}
+
 validate_trust_update() {
   local old="$1" new="$2"
   ensure_fast_forward "$old" "$new" "$TRUST_REF"
-  load_trust_state "$new"
-  # Run shared verifier if available (preferred for both modes)
-  if [ -x "$GIT_DIR/../scripts/shiplog-verify-trust.sh" ]; then
-    (cd "$GIT_DIR/.." && ./scripts/shiplog-verify-trust.sh --old "$old" --new "$new" --ref "$TRUST_REF") || error "trust verification failed"
-  else
-    # Fallback: require at least one valid signature and block threshold>1 by default
-    enforce_trust_threshold "$new"
+  resolve_trust_verifier_bin
+  if [ -n "$TRUST_VERIFIER_BIN" ]; then
+    dbg "trust: running shared verifier $TRUST_VERIFIER_BIN (GIT_DIR=${GIT_DIR:-unset})"
+    GIT_DIR="${GIT_DIR:-$(git rev-parse --absolute-git-dir)}" \
+    SHIPLOG_TRUST_VERIFY_LIB="${SHIPLOG_TRUST_VERIFY_LIB:-$TRUST_VERIFY_LIB_PATH}" \
+      "$TRUST_VERIFIER_BIN" --old "$old" --new "$new" --ref "$TRUST_REF" || error "trust verification failed for $TRUST_REF"
+    return 0
   fi
+  dbg "trust: no shared verifier script found; using the sourced module $TRUST_VERIFY_LIB_PATH"
+  trust_verify_update "$old" "$new" "$TRUST_REF" || error "trust verification failed for $TRUST_REF"
+}
+
+# --- Policy ref ------------------------------------------------------------
+policy_signature_required() {
+  local setting="${SHIPLOG_REQUIRE_SIGNED_POLICY:-}"
+  if [ -z "$setting" ]; then
+    # Default: required as soon as a trust roster exists on this server.
+    [ -n "$CURRENT_TRUST_TIP" ]
+    return $?
+  fi
+  case "$(printf '%s' "$setting" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 validate_policy_update() {
   local old="$1" new="$2"
   ensure_fast_forward "$old" "$new" "$POLICY_REF"
-load_policy_state "$new"
-}
-
-# Enforce that the new trust commit is properly signed and (eventually) co-signed
-enforce_trust_threshold() {
-  local commit="$1"
-  # Trust-commit signature gate:
-  # - SHIPLOG_REQUIRE_SIGNED_TRUST defaults to 0 (signature checks skipped)
-  # - For production, set to 1/true/yes/on to enforce signed trust commits
-  #   (leaving it off reduces integrity of trust updates)
-  # Normalize gate safely under set -u
-  local gate gate_mode
-  gate=$(printf '%s' "${SHIPLOG_REQUIRE_SIGNED_TRUST:-0}" | tr '[:upper:]' '[:lower:]')
-  gate_mode=$(printf '%s' "${SHIPLOG_REQUIRE_SIGNED_TRUST_MODE:-commit}" | tr '[:upper:]' '[:lower:]')
-  local gpg_format="${SHIPLOG_GPG_FORMAT:-ssh}"
-  dbg "require_signed: enabled=$gate mode=$gate_mode gpg.format=$gpg_format"
-  local commit_ok=0 commit_checked=0
-  case "$gate" in
-    1|true|yes|on)
-      case "$gate_mode" in
-        commit)
-          commit_checked=1
-          if [ -n "$SIGNERS_FILE" ]; then
-            if GIT_SSH_ALLOWED_SIGNERS="$SIGNERS_FILE" git -c gpg.format="$gpg_format" verify-commit "$commit" >/dev/null 2>&1; then
-              commit_ok=1
-            else
-              dbg "git verify-commit failed; signature block follows"
-              dbg "$(git log -1 --show-signature --pretty=medium "$commit" 2>/dev/null || true)"
-              error "trust commit $commit has missing or invalid signature"
-            fi
-          else
-            if git -c gpg.format="$gpg_format" verify-commit "$commit" >/dev/null 2>&1; then
-              commit_ok=1
-            else
-              dbg "git verify-commit failed (no allowed_signers); signature block follows"
-              dbg "$(git log -1 --show-signature --pretty=medium "$commit" 2>/dev/null || true)"
-              error "trust commit $commit failed signature verification"
-            fi
-          fi
-          ;;
-        either)
-          commit_checked=1
-          if [ -n "$SIGNERS_FILE" ]; then
-            if GIT_SSH_ALLOWED_SIGNERS="$SIGNERS_FILE" git -c gpg.format="$gpg_format" verify-commit "$commit" >/dev/null 2>&1; then
-              commit_ok=1
-            else
-              dbg "git verify-commit failed under 'either'; will attempt attestation fallback if applicable"
-              dbg "$(git log -1 --show-signature --pretty=medium "$commit" 2>/dev/null || true)"
-            fi
-          else
-            if git -c gpg.format="$gpg_format" verify-commit "$commit" >/dev/null 2>&1; then
-              commit_ok=1
-            else
-              dbg "git verify-commit failed under 'either' (no allowed_signers)"
-              dbg "$(git log -1 --show-signature --pretty=medium "$commit" 2>/dev/null || true)"
-            fi
-          fi
-          ;;
-        attestation)
-          : ;; # handled below
-        *)
-          dbg "unknown SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=$gate_mode; defaulting to commit"
-          commit_checked=1
-          if ! git -c gpg.format="$gpg_format" verify-commit "$commit" >/dev/null 2>&1; then
-            error "trust commit $commit failed signature verification"
-          fi
-          commit_ok=1
-          ;;
-      esac
-      ;;
-    *) : ;;
-  esac
-
-  # Enforce threshold semantics progressively.
-  # NOTE: Git commits carry a single embedded signature. Multi-maintainer co-signing requires a
-  # higher-level pattern (e.g., a linear chain of N commits over the same tree, or detached
-  # attestations stored in the trust tree). Until that is implemented, we fail closed by default
-  # when threshold > 1, with an escape hatch for staged rollouts.
-  local threshold
-  threshold=$(printf '%s' "$CURRENT_TRUST_JSON" | "$JQ_BIN" -r '.threshold // 1')
-  case "$threshold" in
-    ''|null) threshold=1 ;;
-  esac
-  if ! printf '%s' "$threshold" | grep -Eq '^[1-9][0-9]*$'; then
-    error "trust.json invalid threshold value: $threshold"
+  local policy_json
+  if ! policy_json=$(git show "$new:.shiplog/policy.json" 2>/dev/null) || [ -z "$policy_json" ]; then
+    error "policy commit $new is missing .shiplog/policy.json"
   fi
-
-  if [ "$threshold" -gt 1 ]; then
-    if [ "${SHIPLOG_ALLOW_TRUST_THRESHOLD_UNENFORCED:-0}" != "1" ]; then
-      # Attempt minimal attestation enforcement if requested or as 'either' fallback
-      if [ "$gate_mode" = "attestation" ] || { [ "$gate_mode" = "either" ] && [ "$commit_checked" = "1" ] && [ "$commit_ok" != "1" ]; }; then
-        attestation_verify "$commit" "$threshold" || error "verified fewer than $threshold attestations"
-        return 0
-      fi
-      error "trust threshold $threshold not yet enforced by hook; set SHIPLOG_ALLOW_TRUST_THRESHOLD_UNENFORCED=1 to allow temporarily"
+  run_policy_validator "$policy_json"
+  if policy_signature_required; then
+    if [ -z "$CURRENT_TRUST_TIP" ]; then
+      error "SHIPLOG_REQUIRE_SIGNED_POLICY is enabled but trust ref $TRUST_REF is missing; push trust first"
     fi
-  fi
-  # If threshold==1 and commit verification did not succeed (or attestation mode is explicitly
-  # requested), attempt attestation verification as the decision-maker for this update.
-  # This ensures SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=attestation enforces attestations even when
-  # the commit signature is absent or unaccepted.
-  if [ "$threshold" -eq 1 ]; then
-    if { [ "$commit_checked" = "1" ] && [ "$commit_ok" != "1" ]; } || [ "$gate_mode" = "attestation" ]; then
-      attestation_verify "$commit" 1 || error "no valid attestation found for threshold=1"
-    fi
-  fi
-}
-
-# Minimal attestation verification for the fallback path in this hook
-attestation_verify() {
-  local commit="$1" threshold="$2"
-  command -v ssh-keygen >/dev/null 2>&1 || return 1
-  [ -n "$SIGNERS_FILE" ] || return 1
-  # Collect attestation sigs under .shiplog/trust_sigs/
-  mapfile -t sigs < <(git ls-tree -r --name-only "$commit" | awk '/^\.shiplog\/trust_sigs\//{print}')
-  local nsigs=${#sigs[@]}
-  dbg "attestation(fallback): found $nsigs signature file(s)"
-  [ "$nsigs" -ge 1 ] || return 1
-  # Build canonical base payload
-  local oid_trust oid_sigs base trust_id tmp_in verified=0 principals_seen=""
-  trust_id=$(printf '%s' "$CURRENT_TRUST_JSON" | "$JQ_BIN" -r '.id // "shiplog-trust-root"')
-  oid_trust=$(git ls-tree "$commit" trust.json | awk '{print $3}')
-  oid_sigs=$(git ls-tree "$commit" allowed_signers | awk '{print $3}')
-  if [ -n "$oid_sigs" ]; then
-    base=$(printf '100644 blob %s\ttrust.json\n100644 blob %s\tallowed_signers\n' "$oid_trust" "$oid_sigs" | git mktree)
+    trust_verify_commit_by_maintainer "$new" "$SIGNERS_FILE" "$CURRENT_TRUST_JSON" "policy commit" >/dev/null \
+      || error "policy update $new must be signed by a current maintainer listed in $TRUST_REF"
   else
-    base=$(printf '100644 blob %s\ttrust.json\n' "$oid_trust" | git mktree)
+    dbg "policy: maintainer signature not required (SHIPLOG_REQUIRE_SIGNED_POLICY=${SHIPLOG_REQUIRE_SIGNED_POLICY:-unset}, trust tip=${CURRENT_TRUST_TIP:-none})"
   fi
-  tmp_in=$(mktemp)
-  printf 'shiplog-trust-tree-v1\n%s\n%s\n%s\n' "$base" "$trust_id" "$threshold" >"$tmp_in"
-  for path in "${sigs[@]}"; do
-    principal=$(basename "$path" | sed 's/\.sig$//')
-    sigblob=$(git show "$commit:$path" 2>/dev/null || true)
-    [ -n "$sigblob" ] || continue
-    sigfile=$(mktemp)
-    printf '%s' "$sigblob" > "$sigfile"
-    if ssh-keygen -Y verify -n shiplog-trust -f "$SIGNERS_FILE" -I "$principal" -s "$sigfile" < "$tmp_in" >/dev/null 2>&1; then
-      case " $principals_seen " in *" $principal "*) : ;; *) principals_seen="$principals_seen $principal"; verified=$((verified+1));; esac
-    fi
-    rm -f "$sigfile"
-  done
-  rm -f "$tmp_in"
-  dbg "attestation(fallback): verified=$verified threshold=$threshold"
-  [ "$verified" -ge "$threshold" ]
 }
 
+# --- Journals --------------------------------------------------------------
 read_commit_json() {
   local commit="$1"
   git show -s --format=%B "$commit" | awk '/^---/{flag=1;next}flag'
@@ -550,11 +528,10 @@ ensure_commit_signed_if_required() {
   if ! git cat-file commit "$commit" | grep -q '^gpgsig ' ; then
     error "commit $commit missing required signature"
   fi
-  local gpg_format="${SHIPLOG_GPG_FORMAT:-ssh}"
   if [ -n "$SIGNERS_FILE" ]; then
-    GIT_SSH_ALLOWED_SIGNERS="$SIGNERS_FILE" git -c gpg.format="$gpg_format" verify-commit "$commit" >/dev/null 2>&1 || error "signature for $commit not accepted"
+    trust_verify_commit_roster_signature "$commit" "$SIGNERS_FILE" || error "signature for $commit not accepted by the trust roster"
   else
-    git -c gpg.format="$gpg_format" verify-commit "$commit" >/dev/null 2>&1 || error "signature verification failed for $commit"
+    trust_verify_commit_roster_signature "$commit" "" || error "signature verification failed for $commit"
   fi
 }
 
@@ -628,7 +605,7 @@ validate_journal_updates() {
   fi
 
   local range
-  if [ "$old" = "0000000000000000000000000000000000000000" ]; then
+  if [ "$old" = "$ZERO_OID" ]; then
     range="$new"
   else
     range="$new"" ""^$old"
@@ -640,6 +617,17 @@ validate_journal_updates() {
   done
 }
 
+# --- Deletions -------------------------------------------------------------
+refuse_delete() {
+  local refname="$1"
+  if [ "$ALLOW_REF_DELETE" = "1" ]; then
+    warn "SHIPLOG_ALLOW_REF_DELETE=1: allowing deletion of $refname. Append-only and fast-forward guarantees do not hold for this ref until it is recreated; record this in your audit log."
+    return 0
+  fi
+  error "deletion of $refname is not permitted (set SHIPLOG_ALLOW_REF_DELETE=1 in the hook environment for emergency recovery; also set receive.denyDeletes=true on the server)"
+}
+
+# --- Main ------------------------------------------------------------------
 CURRENT_TRUST_TIP=$(git rev-parse -q --verify "$TRUST_REF" 2>/dev/null || true)
 if [ -n "$CURRENT_TRUST_TIP" ]; then
   load_trust_state "$CURRENT_TRUST_TIP"
@@ -656,9 +644,19 @@ else
 fi
 
 while read -r old_sha new_sha refname; do
-  if [ "$new_sha" = "0000000000000000000000000000000000000000" ]; then
-    continue
-  fi
+  case "$refname" in
+    "$TRUST_REF"|"$POLICY_REF"|refs/_shiplog/journal/*|refs/_shiplog/anchors/*)
+      if [ "$new_sha" = "$ZERO_OID" ]; then
+        refuse_delete "$refname"
+        continue
+      fi
+      ;;
+    *)
+      if [ "$new_sha" = "$ZERO_OID" ]; then
+        continue
+      fi
+      ;;
+  esac
   case "$refname" in
     "$TRUST_REF")
       validate_trust_update "$old_sha" "$new_sha"
