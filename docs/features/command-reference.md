@@ -4,11 +4,11 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
 
 ## Global Options
 
-- `--env <ENV>` — Target environment (default `prod`; can also set `SHIPLOG_ENV`).
+- `--env <ENV>` — Target environment (default `prod`; can also set `SHIPLOG_ENV`). Environment precedence: positional `ENV` on the subcommand > subcommand `--env` > global `--env` > `SHIPLOG_ENV` > `prod`. The selected environment drives both the journal ref and policy resolution (per-environment `require_signed` and author overrides).
 - `--boring` — Non-interactive mode (plain output; prompts disabled). Also `SHIPLOG_BORING=1`.
 - `--yes` — Auto-confirm prompts (sets `SHIPLOG_ASSUME_YES=1`).
 - `--no-push` / `--push` — Control auto-push behavior for commands that push refs.
-- `--dry-run` — Preview actions without updating Shiplog journals or notes (`SHIPLOG_DRY_RUN=1`).
+- `--dry-run[=VALUE]` — Preview actions without updating Shiplog journals or notes (`SHIPLOG_DRY_RUN=1`). `VALUE` accepts `1|true|yes|on|0|false|no|off` (any case); anything else is an error.
 - `--version` `-V` — Print version and exit.
 - `--help` `-h` — Show usage.
 
@@ -90,15 +90,17 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
   - Usage: `git shiplog publish` (current env), `git shiplog publish --env prod`, `git shiplog publish --all --policy`
   - Notes: use this at the end of a deployment if you disable auto-push. Precedence for pushing: command flags > `git config shiplog.autoPush` > `SHIPLOG_AUTO_PUSH`.
 
-- `policy [show|validate|require-signed|toggle] [--json] [--boring]`
+- `policy [show|validate|require-signed|toggle] [--env ENV] [--json] [--boring]`
   - Purpose: inspect/change effective policy and signing requirement.
   - Usage:
-    - Show (plain): `git shiplog policy show`
+    - Show (plain): `git shiplog policy show` (for another environment: `git shiplog policy show --env staging`)
     - Show (JSON): `git shiplog policy show --json`
-    - Validate: `git shiplog policy validate`
+    - Validate the working-tree file (or the ref when no file exists): `git shiplog policy validate`
+    - Validate the published ref: `git shiplog policy validate --ref`; any file: `git shiplog policy validate --file path.json`
     - Require signed: `git shiplog policy require-signed true`
     - Toggle: `git shiplog policy toggle`
-  - JSON: includes `env_require_signed` map from `deployment_requirements`.
+  - Notes: `show` reports the source of every field (`sources` in JSON, `(from ...)` in plain text) and only warns when signing is on but the signers file is missing; `write`/`run`/`append`/`verify` refuse in that state. `require-signed`/`toggle` abort before moving the local policy ref when the resulting document fails validation. A policy document that fails validation stops every command (no fallback to defaults). See `docs/features/policy.md` for the precedence table.
+  - JSON: includes `env_require_signed` map from `deployment_requirements`, `sources`, `allowed_signers_file_exists` and `warnings`.
 
 - `trust sync [REF] [DEST]`
   - Purpose: sync allowed signers from a trust ref to a local file.

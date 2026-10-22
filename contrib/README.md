@@ -33,7 +33,7 @@ The hook expects the policy file to be available under `refs/_shiplog/policy/cur
 
 ## CI Helpers
 
-- `scripts/shiplog-sync-policy.sh` – publishes `.shiplog/policy.json` to the policy ref as a fast-forward signed commit (does not push). Run this from the repository root (CI or local) after merging the policy change branch, then push the ref:
+- `scripts/shiplog-sync-policy.sh` – validates `.shiplog/policy.json` with `scripts/policy/validate.sh` (aborting on failure) and publishes it to the policy ref as a fast-forward commit (does not push). The commit is signed when `git config user.signingkey` is set or `SHIPLOG_POLICY_SIGN=1`; otherwise it is unsigned and a hint is printed. Run this from the repository root (CI or local) after merging the policy change branch, then push the ref:
 
 ```bash
 ./scripts/shiplog-sync-policy.sh

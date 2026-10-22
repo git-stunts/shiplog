@@ -22,8 +22,10 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
   - Default: `prod`
 
 - `SHIPLOG_AUTO_PUSH` — Auto-push Shiplog refs to the configured remote when available (`write`, some `setup` flows)
-  - Values: `1` (default) or `0`
-  - Precedence: command flags > `git config shiplog.autoPush` > `SHIPLOG_AUTO_PUSH`.
+  - Values: `1` (default) or `0` (any boolean spelling, see below)
+  - Precedence: command flags (`--push`/`--no-push`) > `git config shiplog.autoPush` > `SHIPLOG_AUTO_PUSH` > default on. When the effective value is off and a remote exists, `write` prints a "remember to publish" hint.
+
+- Boolean variables (`SHIPLOG_AUTO_PUSH`, `SHIPLOG_BORING`, `SHIPLOG_DRY_RUN`, `SHIPLOG_SIGN`, `SHIPLOG_SETUP_*`) accept `1|true|yes|on` and `0|false|no|off`, case-insensitively. Any other value is an error: Shiplog fails closed rather than treating a typo as "off".
 
 - `SHIPLOG_REMOTE` — Remote name shiplog commands use for fetch/publish/push operations
   - Default: `origin` (or `git config shiplog.remote` when set)
@@ -43,8 +45,8 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
 
 ## Policy & Signing
 
-- `SHIPLOG_AUTHORS` — Space-separated allowlist of authors (emails). Overrides policy.
-- `SHIPLOG_ALLOWED_SIGNERS` — Path to allowed signers file (SSH). Overrides policy.
+- `SHIPLOG_AUTHORS` — Space-separated allowlist of authors (emails). Highest precedence: beats `git config shiplog.policy.allowedAuthors`, which beats the policy document.
+- `SHIPLOG_ALLOWED_SIGNERS` — Path to allowed signers file (SSH). Highest precedence: beats `git config shiplog.policy.allowedSignersFile`, then the policy's `allow_ssh_signers_file`; `gpg.ssh.allowedSignersFile` is only a fallback. Relative paths resolve from the repository root. See docs/features/policy.md for the full table.
 - `SHIPLOG_SIGN` — Require signing for `write` operations in this session (policy may still require it).
   - Values: `1` or `0` (default)
 
@@ -82,13 +84,21 @@ See: docs/features/write.md for full semantics and examples.
 
 - `SHIPLOG_SETUP_STRICTNESS` — `open` | `balanced` | `strict`
 - `SHIPLOG_SETUP_STRICT_ENVS` — Space-separated envs for per-env strictness (strict only)
-- `SHIPLOG_SETUP_AUTHORS` — Space-separated emails for allowlist (balanced)
+- `SHIPLOG_SETUP_AUTHORS` — Space-separated emails for the allowlist (any strictness; `balanced` and `strict` default to `git config user.email` when empty)
 - `SHIPLOG_SETUP_AUTO_PUSH` — `1` to push policy/trust to origin
 - `SHIPLOG_SETUP_DRY_RUN` — `1` to preview without writing/syncing
 
+## Policy Publishing
+
+- `SHIPLOG_POLICY_SIGN` — `scripts/shiplog-sync-policy.sh` (also used by `setup`, `policy require-signed` and `policy toggle`): sign the policy commit (`1`) or not (`0`).
+  - Default: `1` when `git config user.signingkey` is set, otherwise `0` with a printed hint. The pre-receive hook requires a maintainer signature on policy updates once a trust ref exists.
+- `SHIPLOG_POLICY_REF` — Policy ref the sync script and the CLI read/write (default `refs/_shiplog/policy/current`).
+- `SHIPLOG_POLICY_MESSAGE` — Commit message used by the sync script.
+- `SHIPLOG_REPO_ROOT` — *(exported by `git shiplog`, read-only for users)* Repository root that `.shiplog/policy.json`, `.shiplog/plugins` and relative signers paths resolve against, so commands behave the same from a subdirectory.
+
 ## Dry Run
 
-- `SHIPLOG_DRY_RUN` — Boolean/string flag (default `0`/`false`). When set to `1`, `true`, `yes`, or `on`, Shiplog enters dry-run mode: write/append/run/setup subcommands log intended actions without updating journals, notes, or pushing refs. Example: `export SHIPLOG_DRY_RUN=1` (bash/zsh) or `set -x SHIPLOG_DRY_RUN 1` (fish). Set `0`, `false`, `no`, or `off` to disable.
+- `SHIPLOG_DRY_RUN` — Boolean flag (default `0`/`false`). When set to `1`, `true`, `yes`, or `on` (any case), Shiplog enters dry-run mode: write/append/run/setup subcommands log intended actions without updating journals, notes, or pushing refs. Example: `export SHIPLOG_DRY_RUN=1` (bash/zsh) or `set -x SHIPLOG_DRY_RUN 1` (fish). Set `0`, `false`, `no`, or `off` to disable. Any other value (and any other value for `--dry-run=VALUE`) is an error.
 
 ## Trust Bootstrap (non-interactive)
 
