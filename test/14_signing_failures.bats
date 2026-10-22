@@ -33,6 +33,21 @@ JSON
   git push -q "$REMOTE_NAME" refs/_shiplog/trust/root
 }
 
+make_entry_signed() {
+  SHIPLOG_SERVICE="signing-test" \
+  SHIPLOG_STATUS="success" \
+  SHIPLOG_REASON="signed entry" \
+  SHIPLOG_TICKET="SIGN-2" \
+  SHIPLOG_REGION="us-east-1" \
+  SHIPLOG_CLUSTER="prod-1" \
+  SHIPLOG_NAMESPACE="default" \
+  SHIPLOG_IMAGE="ghcr.io/example/app" \
+  SHIPLOG_TAG="v0.0.2" \
+  SHIPLOG_RUN_URL="https://ci.example.local/run/789" \
+  SHIPLOG_SIGN=1 \
+  git shiplog --boring --yes write >/dev/null
+}
+
 make_entry_unsigned() {
   SHIPLOG_SERVICE="signing-test" \
   SHIPLOG_STATUS="success" \
@@ -103,9 +118,31 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
-@test "(skipped) server does not trust client-side allowed_signers" {
-  if [ "${ENABLE_SIGNING:-false}" != "true" ]; then
-    skip "Signing support not enabled in this build"
-  fi
-  skip "Loopback signing test requires reliable signing in CI"
+@test "server does not trust client-side allowed_signers" {
+  # Server state: the trust ref (whose roster is the fixture key from
+  # shiplog_bootstrap_trust) and a policy that requires signatures.
+  git push -q "$REMOTE_NAME" refs/_shiplog/trust/root
+  "$SHIPLOG_PROJECT_ROOT"/scripts/shiplog-sync-policy.sh >/dev/null
+  git push -q "$REMOTE_NAME" refs/_shiplog/policy/current
+  git shiplog init >/dev/null
+
+  # Client: sign with a fresh SSH key and add it only to the *local*
+  # allowed_signers. The trust ref on the server never sees this key.
+  shiplog_setup_test_signing
+  shiplog_write_allowed_signers_for_signing_key .shiplog/allowed_signers
+  make_entry_signed
+  local entry
+  entry=$(git rev-parse refs/_shiplog/journal/prod)
+  git cat-file commit "$entry" | grep -q '^gpgsig '
+
+  # The client trusts its own roster...
+  run env SHIPLOG_SIGN=1 git shiplog --boring verify
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK=1"* ]]
+
+  # ...the server does not: its only roster is the trust ref.
+  run git push "$REMOTE_NAME" refs/_shiplog/journal/prod
+  [ "$status" -ne 0 ]
+  run git --git-dir="$REMOTE_DIR" rev-parse --verify refs/_shiplog/journal/prod
+  [ "$status" -ne 0 ]
 }

@@ -9,12 +9,13 @@ permissions:
   contents: read
 
 jobs:
+  # One test image, one suite. Signing coverage (test/06, test/14, test/18)
+  # uses SSH keys generated per test, so there is no separate signing build
+  # (#135). The suite itself runs with no Bats timeout; this job timeout is
+  # the only guard (#132).
   tests:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        signing: ["false", "true"]
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -27,20 +28,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{runner.os}}-buildx-${{matrix.signing}}-${{github.sha}}
+          key: ${{runner.os}}-buildx-${{github.sha}}
           restore-keys: |
-            ${{runner.os}}-buildx-${{matrix.signing}}-
             ${{runner.os}}-buildx-
 
-      - name: Build test image (signing=${{matrix.signing}})
+      - name: Build test image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: false
           load: true
           tags: shiplog-tests:ci
-          build-args: |
-            ENABLE_SIGNING=${{ matrix.signing }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
@@ -57,7 +55,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-artifacts-signing-${{ matrix.signing }}
+          name: test-artifacts
           path: |
             test/**/*.log
             ci-logs/*.log
