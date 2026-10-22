@@ -1297,7 +1297,9 @@ EOF
           if [ -n "$raw_policy" ]; then
             printf '%s\n' "$raw_policy" | jq -r '(.deployment_requirements // {}) | to_entries | map(select((.value|type) == "object" and (.value|has("require_signed")))) | .[] | "Require Signed (\(.key)): \(.value.require_signed)"' 2>/dev/null || true
           fi
-          [ -n "$warnings" ] && printf '%s\n' "$warnings"
+          if [ -n "$warnings" ]; then
+            printf '%s\n' "$warnings"
+          fi
         else
           local rows="" raw_policy
           rows+='Environment'$'\t'"$policy_env"$'\n'
