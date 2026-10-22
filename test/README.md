@@ -14,9 +14,9 @@ The `test/` directory contains the Bats-based integration suite that exercises t
 
 ## Test Runner
 
-- `make test` builds the local Docker image (if needed) and runs all Bats files. The image now bakes in your working tree snapshot, so the container executes `/usr/local/bin/run-tests` without bind-mounting your repo.
+- `make test` builds the local Docker image (if needed) and runs all Bats files. The image bakes a snapshot of your working tree into `/workspace` (`COPY . /workspace` in the `Dockerfile`), so a local `make test` runs `/usr/local/bin/run-tests` against that snapshot with nothing bind-mounted. CI (`.github/workflows/ci.yml`) runs the same image with the checkout bind-mounted over `/workspace` (`docker run -v "$PWD":/workspace`) so the container tests the exact commit under test.
 - Parallel branches or agents can use their own image and container names without changing the defaults: `make test IMAGE=shiplog-tests-g8a CONTAINER_NAME=shiplog-tests-g8a`.
-- The `run-tests` entrypoint copies the baked snapshot to a temporary directory, strips any configured Git remotes, and sets `SHIPLOG_HOME` to that copy before executing Bats.
+- The `run-tests` entrypoint copies `/workspace` (snapshot or mount) to a temporary directory, strips any configured Git remotes, and sets `SHIPLOG_HOME` to that copy before executing Bats.
 - Default test mode avoids network clones: `SHIPLOG_USE_LOCAL_SANDBOX=1` (set to `0` only if you explicitly need to hit the remote sandbox).
 - There is no timeout by default. `TEST_TIMEOUT_SECS=<seconds> make test` opts in to an in-container `timeout` around Bats; the same rule applies to `test.sh` (ci-matrix) and the Dockerfile entrypoint. `make test` forwards `TEST_TIMEOUT_SECS`, `SHIPLOG_USE_LOCAL_SANDBOX` and `BATS_FLAGS` into the container. Always capture container logs when a timeout occurs. Add `BATS_FLAGS` (e.g., `--print-output-on-failure -T`) for verbose runs.
 - Signing coverage (`test/06`, `test/14`, `test/18`) generates an SSH key per test via `shiplog_setup_test_signing`; there is no separate signing build or image-level key.
@@ -24,6 +24,7 @@ The `test/` directory contains the Bats-based integration suite that exercises t
 - Each Bats file calls `load helpers/common`, whose `shiplog_install_cli` helper ensures the CLI is present and executable before tests begin.
 
 ## Adding or Updating Tests
+
 1. Create a new `*.bats` file or update an existing one under `test/`.
 2. Reuse shared setup logic via `load helpers/common` and environment variables (`SHIPLOG_*`) rather than duplicating installation code.
 3. Use the global `--yes` flag instead of piping `yes |` when a test needs to auto-confirm prompts.
