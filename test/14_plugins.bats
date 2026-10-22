@@ -9,7 +9,9 @@ setup() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-awk '{ gsub(/password=[^ ]+/, "password=[REDACTED]"); print }'
+# Stop at quotes too: the reason also appears inside the JSON trailer, and a
+# scrubber that eats the closing quote breaks the trailer (the guard refuses it).
+awk '{ gsub(/password=[^ "]+/, "password=[REDACTED]"); print }'
 PLUGIN
   chmod +x .shiplog/plugins/pre-commit-message.d/10-scrub.sh
 }
