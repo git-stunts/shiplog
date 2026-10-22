@@ -221,7 +221,7 @@ ensure_signed_on_verify() {
 
   local verify_file="$SIGNERS_FILE_EFFECTIVE"
   if [ -n "$verify_file" ] && [ -f "$verify_file" ]; then
-    GIT_SSH_ALLOWED_SIGNERS="$verify_file" git verify-commit "$commit" >/dev/null 2>&1 \
+    git -c gpg.ssh.allowedSignersFile="$verify_file" verify-commit "$commit" >/dev/null 2>&1 \
       || return 1
   else
     git verify-commit "$commit" >/dev/null 2>&1 || return 1
@@ -285,7 +285,7 @@ require_allowed_signer() {
     die "shiplog: signing precheck failed (configure your signing key)"
   fi
 
-  if ! GIT_SSH_ALLOWED_SIGNERS="$asf" git verify-commit "$tmp" >/dev/null 2>&1; then
+  if ! git -c gpg.ssh.allowedSignersFile="$asf" verify-commit "$tmp" >/dev/null 2>&1; then
     die "shiplog: signature not accepted by allowed signers file ($asf)"
   fi
 }
