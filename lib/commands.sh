@@ -188,12 +188,41 @@ policy_install_file() {
   fi
 }
 
+# shiplog_require_flag_value FLAG REMAINING_ARGC
+# A flag that takes a value must not be the last argument. Without this check the
+# parsers' `shift; x="$1"; shift` pattern fails on the second shift under errexit
+# and the command exits 1 with nothing on stderr (#139 A).
+shiplog_require_flag_value() {
+  [ "$2" -ge 2 ] || die "shiplog: $1 requires a value"
+}
+
+# shiplog_validate_env_name NAME
+# Journal environments become ref components (<ref root>/journal/NAME), so a typo
+# or a stray flag value must never create a new journal (#117). Dies on anything
+# Git would not accept as a one-level ref name, on whitespace, `..` or a leading `-`.
+shiplog_validate_env_name() {
+  local name="$1"
+  [ -n "$name" ] || die "shiplog: environment name must not be empty"
+  case "$name" in
+    -*) die "shiplog: invalid environment name '$name' (must not start with '-')" ;;
+    *..*) die "shiplog: invalid environment name '$name' (must not contain '..')" ;;
+    *[[:space:]]*) die "shiplog: invalid environment name '$name' (must not contain whitespace)" ;;
+  esac
+  git check-ref-format --allow-onelevel "$name" >/dev/null 2>&1 \
+    || die "shiplog: invalid environment name '$name' (fails git check-ref-format)"
+}
+
 cmd_version() {
   printf 'shiplog %s\n' "$(shiplog_version)"
 }
 
 cmd_init() {
   ensure_in_repo
+  case "${1:-}" in
+    --help|-h)
+      printf 'Usage: git shiplog init\n\nConfigure fetch/push refspecs for the Shiplog ref root and enable reflogs.\n'
+      return 0 ;;
+  esac
   local remote
   remote=$(shiplog_remote_name)
   local fetch_value="+$REF_ROOT/*:$REF_ROOT/*"
@@ -225,17 +254,19 @@ cmd_init() {
 cmd_write() {
   ensure_in_repo
   local env="$DEFAULT_ENV"
-  local args=()
-  local opt
+  local positional_env=""
 
   # Parse positional ENV and optional flags to prefill prompts
-  local json_from_stdin=0
   local dry_run=0
   if shiplog_is_dry_run; then
     dry_run=1
   fi
 
   while [ $# -gt 0 ]; do
+    case "$1" in
+      --env|--service|--status|--reason|--ticket|--region|--cluster|--namespace|--image|--tag|--run-url)
+        shiplog_require_flag_value "$1" $# ;;
+    esac
     case "$1" in
       --help|-h)
         cat <<'EOF'
@@ -306,14 +337,29 @@ EOF
         shift
         continue
         ;;
-      --) shift; break ;;
-      -*) args+=("$1"); shift; continue ;;
+      --)
+        shift
+        if [ $# -gt 0 ]; then
+          [ -z "$positional_env" ] || die "shiplog: write accepts a single ENV argument (got '$positional_env' and '$1')"
+          positional_env="$1"; shift
+        fi
+        [ $# -eq 0 ] || die "shiplog: unexpected argument to write: $1"
+        break ;;
+      -*)
+        # Unknown flags used to be collected and ignored, which promoted the next
+        # word to ENV and created a stray journal (#117).
+        die "shiplog: unknown write option: $1 (see git shiplog write --help)" ;;
       *)
-        # First non-flag positional argument is ENV if not set by --env
-        if [ "$env" = "$DEFAULT_ENV" ]; then env="$1"; shift; continue; else args+=("$1"); shift; continue; fi
-        ;;
+        [ -z "$positional_env" ] || die "shiplog: write accepts a single ENV argument (got '$positional_env' and '$1')"
+        positional_env="$1"; shift; continue ;;
     esac
   done
+
+  # Positional ENV > --env > SHIPLOG_ENV/global --env > default
+  if [ -n "$positional_env" ]; then
+    env="$positional_env"
+  fi
+  shiplog_validate_env_name "$env"
 
   require_allowed_author
   require_allowed_signer
@@ -536,6 +582,32 @@ cmd_run() {
   local -a run_argv=()
   while [ $# -gt 0 ]; do
     case "$1" in
+      --env|--service|--reason|--status-success|--status-failure|--namespace|--ticket|--region|--cluster)
+        shiplog_require_flag_value "$1" $# ;;
+    esac
+    case "$1" in
+      --help|-h)
+        cat <<'EOF'
+Usage: git shiplog run [OPTIONS] -- COMMAND [ARGS...]
+
+Execute COMMAND, capture its output as a note, and append a journal entry
+describing the run. Everything after `--` is the command (it may start with `-`).
+
+Options:
+  --env ENV                 Environment (defaults to SHIPLOG_ENV or prod)
+  --service NAME            Service/component name (required)
+  --reason TEXT             Free-form reason/summary
+  --status-success STATUS   Status recorded when COMMAND exits 0 (default: success)
+  --status-failure STATUS   Status recorded when COMMAND fails (default: failed)
+  --ticket ID               Ticket/PR reference
+  --region R                Region
+  --cluster C               Cluster
+  --namespace NS            Namespace
+  --dry-run                 Print the command and entry preview without running
+
+Global flags: --boring (plain), --yes (auto-confirm), --no-push/--push
+EOF
+        return 0 ;;
       --env)
         shift; env="${1:-$env}"; shift; continue ;;
       --env=*)
@@ -614,6 +686,7 @@ cmd_run() {
   if [ -z "$service" ]; then
     die "shiplog: --service (or SHIPLOG_SERVICE) is required for run"
   fi
+  shiplog_validate_env_name "$env"
 
   local -a quoted_cmd=()
   local arg
@@ -887,6 +960,10 @@ cmd_append() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
+      --env|--service|--status|--reason|--ticket|--region|--cluster|--namespace|--image|--tag|--run-url|--log|--json|--json-file)
+        shiplog_require_flag_value "$1" $# ;;
+    esac
+    case "$1" in
       --env)
         shift; env="${1:-$env}"; shift; continue ;;
       --env=*)
@@ -1011,8 +1088,15 @@ EOF
 
 cmd_ls() {
   ensure_in_repo
+  case "${1:-}" in
+    --help|-h)
+      printf 'Usage: git shiplog ls [ENV] [LIMIT]\n\nList the most recent LIMIT entries (default 20) of the ENV journal.\n'
+      return 0 ;;
+    -*) die "shiplog: unknown ls option: $1 (see git shiplog ls --help)" ;;
+  esac
   local env="${1:-$DEFAULT_ENV}"
   local limit="${2:-20}"
+  shiplog_validate_env_name "$env"
   local ref; ref="$(ref_journal "$env")"
   [ -n "$(current_tip "$ref")" ] || die "No entries at $ref"
   pretty_ls "$ref" "$limit"
@@ -1021,15 +1105,40 @@ cmd_ls() {
 cmd_show() {
   ensure_in_repo
   local json_only=0 boring_local=0 compact=0
-  local args=()
+  local target=""
+  # Flags are accepted in any position (`show <sha> --json` works) and unknown
+  # flags are errors instead of being silently dropped (#139 B).
   while [ $# -gt 0 ]; do
     case "$1" in
       --json) json_only=1; shift; continue ;;
       --json-compact|--jsonl) json_only=1; compact=1; shift; continue ;;
       --boring|-b) boring_local=1; shift; continue ;;
-      --) shift; break ;;
-      -*) args+=("$1"); shift; continue ;;
-      *) break ;;
+      --help|-h)
+        cat <<'EOF'
+Usage: git shiplog show [--json|--json-compact|--jsonl] [--boring] [COMMIT|REF]
+
+Show one journal entry (defaults to the latest entry of the current environment).
+Flags may appear before or after the target.
+
+Options:
+  --json                 Print only the JSON trailer (pretty)
+  --json-compact, --jsonl
+                         Print only the JSON trailer as one compact line
+  --boring, -b           Plain output (no Bosun boxes)
+EOF
+        return 0 ;;
+      --)
+        shift
+        if [ $# -gt 0 ]; then
+          [ -z "$target" ] || die "shiplog: show accepts a single COMMIT|REF (got '$target' and '$1')"
+          target="$1"; shift
+        fi
+        [ $# -eq 0 ] || die "shiplog: unexpected argument to show: $1"
+        break ;;
+      -*) die "shiplog: unknown show option: $1 (see git shiplog show --help)" ;;
+      *)
+        [ -z "$target" ] || die "shiplog: show accepts a single COMMIT|REF (got '$target' and '$1')"
+        target="$1"; shift; continue ;;
     esac
   done
   # If --boring passed after subcommand, honor it
@@ -1037,7 +1146,6 @@ cmd_show() {
     SHIPLOG_BORING=1; export SHIPLOG_BORING
   fi
 
-  local target="${1:-}"
   if [ -z "$target" ]; then
     target="$(ref_journal "$DEFAULT_ENV")"
   fi
@@ -1071,9 +1179,44 @@ cmd_show() {
 
 cmd_verify() {
   ensure_in_repo
-  local env="${1:-$DEFAULT_ENV}"
+  local env="$DEFAULT_ENV" positional_env="" allow_empty=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --allow-empty) allow_empty=1; shift ;;
+      --help|-h)
+        cat <<'EOF'
+Usage: git shiplog verify [ENV] [--allow-empty]
+
+Verify signatures and author authorization for every entry of the ENV journal.
+Fails when the journal does not exist, when any entry has a bad signature or an
+unauthorized author, or when no entry verified OK (pass --allow-empty to accept
+an empty result).
+EOF
+        return 0 ;;
+      --)
+        shift
+        if [ $# -gt 0 ]; then
+          [ -z "$positional_env" ] || die "shiplog: verify accepts a single ENV argument (got '$positional_env' and '$1')"
+          positional_env="$1"; shift
+        fi
+        [ $# -eq 0 ] || die "shiplog: unexpected argument to verify: $1"
+        break ;;
+      -*) die "shiplog: unknown verify option: $1 (see git shiplog verify --help)" ;;
+      *)
+        [ -z "$positional_env" ] || die "shiplog: verify accepts a single ENV argument (got '$positional_env' and '$1')"
+        positional_env="$1"; shift ;;
+    esac
+  done
+  if [ -n "$positional_env" ]; then
+    env="$positional_env"
+  fi
+  shiplog_validate_env_name "$env"
   local ref; ref="$(ref_journal "$env")"
-  local ok=0 bad=0 unauth=0
+  # A missing ref used to make rev-list fail silently inside the process
+  # substitution and the command reported "OK=0" with exit 0 (#124).
+  git rev-parse --verify --quiet "$ref" >/dev/null 2>&1 \
+    || die "shiplog: journal $ref not found (nothing to verify for env '$env')"
+  local ok=0 bad=0 unauth=0 author c
   while IFS= read -r c; do
     if ensure_signed_on_verify "$c"; then
       author="$(git show -s --format='%ae' "$c")"
@@ -1085,7 +1228,7 @@ cmd_verify() {
     else
       bad=$((bad+1)); echo "❌ bad or missing signature on $c" >&2
     fi
-  done < <(git rev-list "$(ref_journal "$env")")
+  done < <(git rev-list "$ref")
   local verify_summary="Verified: OK=$ok, BadSig=$bad, Unauthorized=$unauth"
   if shiplog_can_use_bosun; then
     local bosun
@@ -1094,25 +1237,89 @@ cmd_verify() {
   else
     printf '%s\n' "$verify_summary"
   fi
+  if [ "$ok" -eq 0 ] && [ "$allow_empty" -ne 1 ]; then
+    echo "❌ shiplog: no entry in $ref verified OK (pass --allow-empty to accept an empty result)" >&2
+    return 1
+  fi
   [ $bad -eq 0 ] && [ $unauth -eq 0 ]
 }
 
 cmd_export_json() {
   ensure_in_repo
-  local env="${1:-$DEFAULT_ENV}"
   command -v jq >/dev/null 2>&1 || die "jq required for --json export"
-  local ref; ref="$(ref_journal "$env")"
-  git rev-list "$ref" | while read -r c; do
-    git show -s --format=%B "$c" | awk '/^---/{flag=1;next}flag' | jq -c --arg sha "$c" '. + {commit:$sha}'
+  local env="$DEFAULT_ENV" positional_env="" lenient=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --lenient) lenient=1; shift ;;
+      --help|-h)
+        cat <<'EOF'
+Usage: git shiplog export-json [ENV] [--lenient]
+
+Emit one JSON line per journal entry (newest first): the entry trailer plus a
+"commit" field. An entry whose trailer is missing or malformed is emitted as
+  {"commit":"<sha>","error":"invalid trailer","subject":"<first line>"}
+and the export continues. Exit status is 3 when any entry was flagged unless
+--lenient is passed.
+EOF
+        return 0 ;;
+      --)
+        shift
+        if [ $# -gt 0 ]; then
+          [ -z "$positional_env" ] || die "shiplog: export-json accepts a single ENV argument (got '$positional_env' and '$1')"
+          positional_env="$1"; shift
+        fi
+        [ $# -eq 0 ] || die "shiplog: unexpected argument to export-json: $1"
+        break ;;
+      -*) die "shiplog: unknown export-json option: $1 (see git shiplog export-json --help)" ;;
+      *)
+        [ -z "$positional_env" ] || die "shiplog: export-json accepts a single ENV argument (got '$positional_env' and '$1')"
+        positional_env="$1"; shift ;;
+    esac
   done
+  if [ -n "$positional_env" ]; then
+    env="$positional_env"
+  fi
+  shiplog_validate_env_name "$env"
+  local ref; ref="$(ref_journal "$env")"
+  git rev-parse --verify --quiet "$ref" >/dev/null 2>&1 \
+    || die "shiplog: journal $ref not found (nothing to export for env '$env')"
+  # One line per commit, always. A missing or invalid trailer used to either
+  # vanish from the stream (jq printed nothing) or abort the export mid-way
+  # under errexit (#125); it now produces an error record and the loop goes on.
+  local c body trailer line subject flagged=0
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    body="$(git show -s --format=%B "$c" 2>/dev/null || true)"
+    trailer="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+    line=""
+    if [ -n "$trailer" ]; then
+      line=$(printf '%s\n' "$trailer" | jq -c -s --arg sha "$c" 'if length == 1 and (.[0] | type) == "object" then .[0] + {commit:$sha} else error("invalid trailer") end' 2>/dev/null) || line=""
+    fi
+    if [ -n "$line" ]; then
+      printf '%s\n' "$line"
+    else
+      flagged=$((flagged+1))
+      subject="$(printf '%s\n' "$body" | head -n1)"
+      jq -n -c --arg sha "$c" --arg subject "$subject" '{commit:$sha, error:"invalid trailer", subject:$subject}'
+    fi
+  done < <(git rev-list "$ref")
+  if [ "$flagged" -gt 0 ]; then
+    printf '⚠️ shiplog: %s entr%s in %s had an invalid trailer\n' "$flagged" "$([ "$flagged" -eq 1 ] && printf 'y' || printf 'ies')" "$ref" >&2
+    if [ "$lenient" -ne 1 ]; then
+      return 3
+    fi
+  fi
+  return 0
 }
 
 cmd_publish() {
   ensure_in_repo
   local env="$DEFAULT_ENV" push_notes=1 push_policy=0 push_trust=0 all_envs=0
+  local positional_env=""
+  local publish_usage="Usage: git shiplog publish [ENV] [--env ENV] [--no-notes] [--policy] [--trust] [--all]"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --env) shift; env="${1:-$env}"; shift; continue ;;
+      --env) shiplog_require_flag_value "$1" $#; shift; env="$1"; shift; continue ;;
       --env=*) env="${1#*=}"; shift; continue ;;
       --no-notes) push_notes=0; shift; continue ;;
       --policy) push_policy=1; shift; continue ;;
@@ -1120,18 +1327,35 @@ cmd_publish() {
       --all|--all-envs) all_envs=1; shift; continue ;;
       --help|-h)
         cat <<'EOF'
-Usage: git shiplog publish [--env ENV] [--no-notes] [--policy] [--trust] [--all]
+Usage: git shiplog publish [ENV] [--env ENV] [--no-notes] [--policy] [--trust] [--all]
 
 Push Shiplog refs to the configured remote (defaults to origin) without writing
-new entries. By default pushes the current environment journal and its notes.
-Use --env to pick a journal; --all to push all journals under the ref root.
-Optionally include policy/trust refs.
+new entries. By default pushes one environment journal and its notes.
+ENV precedence: positional ENV > --env > SHIPLOG_ENV > default (prod).
+Use --all to push all journals under the ref root. Optionally include
+policy/trust refs.
 EOF
         return 0 ;;
-      --) shift; break ;;
-      *) break ;;
+      --)
+        shift
+        if [ $# -gt 0 ]; then
+          [ -z "$positional_env" ] || die "shiplog: publish accepts a single ENV argument (got '$positional_env' and '$1'). $publish_usage"
+          positional_env="$1"; shift
+        fi
+        [ $# -eq 0 ] || die "shiplog: unexpected argument to publish: $1. $publish_usage"
+        break ;;
+      -*) die "shiplog: unknown publish option: $1. $publish_usage" ;;
+      *)
+        # The documented `publish [ENV]` form; the positional used to be dropped
+        # and the default journal pushed instead (#101).
+        [ -z "$positional_env" ] || die "shiplog: publish accepts a single ENV argument (got '$positional_env' and '$1'). $publish_usage"
+        positional_env="$1"; shift; continue ;;
     esac
   done
+  if [ -n "$positional_env" ]; then
+    env="$positional_env"
+  fi
+  shiplog_validate_env_name "$env"
 
   local remote
   remote=$(shiplog_remote_name)
@@ -1154,9 +1378,12 @@ EOF
   [ "$push_policy" -eq 1 ] && git push --no-verify "$remote" "$POLICY_REF" >/dev/null 2>&1 || true
   [ "$push_trust" -eq 1 ] && git push --no-verify "$remote" "${TRUST_REF:-$TRUST_REF_DEFAULT}" >/dev/null 2>&1 || true
 
+  local pushed_list="${refs[*]}"
   if shiplog_can_use_bosun; then
     local bosun; bosun=$(shiplog_bosun_bin)
-    "$bosun" style --title "Publish" -- "📤 Pushed Shiplog refs to $remote"
+    "$bosun" style --title "Publish" -- "📤 Pushed Shiplog refs to $remote: $pushed_list"
+  else
+    printf '📤 Pushed Shiplog refs to %s: %s\n' "$remote" "$pushed_list"
   fi
 }
 
@@ -1170,6 +1397,16 @@ cmd_policy() {
     case "$1" in
       --boring|-b) boring=1; shift ;;
       --json) as_json=1; shift ;;
+      --help|-h)
+        cat <<'EOF'
+Usage: git shiplog policy [show|validate|require-signed <true|false>|toggle] [--json] [--boring]
+
+  show                    Show the effective policy (default)
+  validate                Validate the policy document
+  require-signed BOOL     Set require_signed in .shiplog/policy.json and sync the policy ref
+  toggle                  Flip require_signed
+EOF
+        return 0 ;;
       show|validate|require-signed|toggle) action="$1"; shift; break ;;
       *) action="$1"; shift; break ;;
     esac
@@ -1408,7 +1645,15 @@ cmd_trust() {
   local action="${1:-sync}"
   shift || true
   case "$action" in
+    --help|-h)
+      printf 'Usage: git shiplog trust <sync [REF] [DEST] | show [REF] [--json]>\n'
+      return 0 ;;
     sync)
+      case "${1:-}" in
+        --help|-h)
+          printf 'Usage: git shiplog trust sync [REF] [DEST]\n\nRefresh the allowed signers file (default .shiplog/allowed_signers) from the trust ref.\n'
+          return 0 ;;
+      esac
       local ref="${1:-${TRUST_REF:-$TRUST_REF_DEFAULT}}"
       local dest="${2:-.shiplog/allowed_signers}"
       [ -x "$SHIPLOG_HOME/scripts/shiplog-trust-sync.sh" ] || die "shiplog: trust sync helper missing at $SHIPLOG_HOME/scripts/shiplog-trust-sync.sh"
@@ -1518,9 +1763,21 @@ cmd_refs() {
   ensure_in_repo
   local sub="${1:-}"; shift || true
   case "$sub" in
+    --help|-h)
+      cat <<'EOF'
+Usage: git shiplog refs <root show | root set REF | migrate [OPTS]>
+
+  root show        Show the effective Shiplog ref root
+  root set REF     Set shiplog.refRoot (e.g. refs/_shiplog or refs/heads/_shiplog)
+  migrate [OPTS]   Mirror refs between roots (--to <refs/...> [--from <refs/...>] [--push] [--remove-old] [--dry-run])
+EOF
+      return 0 ;;
     root)
       local action="${1:-show}"; shift || true
       case "$action" in
+        --help|-h)
+          printf 'Usage: git shiplog refs root show | git shiplog refs root set <refs/...>\n'
+          return 0 ;;
         show)
           # Order of precedence: env, git config, default
           local current_root
@@ -1567,6 +1824,7 @@ cmd_setup() {
   local authors_in="${SHIPLOG_SETUP_AUTHORS:-}" # space-separated emails
   local strict_envs_in="${SHIPLOG_SETUP_STRICT_ENVS:-}" # space-separated env names
   local do_auto_push=0
+  local auto_push_flag=0 # set when --auto-push/--no-auto-push was given explicitly
   local dry_run=0
   local remote
   remote=$(shiplog_remote_name)
@@ -1602,9 +1860,9 @@ cmd_setup() {
       --strict-envs=*)
         strict_envs_in="${1#*=}"; shift ;;
       --auto-push)
-        do_auto_push=1; shift ;;
+        do_auto_push=1; auto_push_flag=1; shift ;;
       --no-auto-push)
-        do_auto_push=0; shift ;;
+        do_auto_push=0; auto_push_flag=1; shift ;;
       --dry-run)
         dry_run=1; export SHIPLOG_SETUP_DRY_RUN=1; shift ;;
       # Trust bootstrap pass-through options (non-interactive)
@@ -1638,11 +1896,13 @@ cmd_setup() {
     esac
   done
 
-  # Env override for auto-push
-  case "${SHIPLOG_SETUP_AUTO_PUSH:-}" in
-    1|true|yes|on) do_auto_push=1 ;;
-    0|false|no|off|'') : ;;
-  esac
+  # Env default for auto-push; an explicit --auto-push/--no-auto-push flag wins (#139 D)
+  if [ "$auto_push_flag" -eq 0 ]; then
+    case "${SHIPLOG_SETUP_AUTO_PUSH:-}" in
+      1|true|yes|on) do_auto_push=1 ;;
+      0|false|no|off|'') : ;;
+    esac
+  fi
 
   # Env override for dry-run
   case "${SHIPLOG_SETUP_DRY_RUN:-}" in
@@ -1868,7 +2128,7 @@ cmd_config() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --interactive|--wizard) interactive=1; shift; continue ;;
-      --answers-file) shift; answers_file="${1:-}"; shift; continue ;;
+      --answers-file) shiplog_require_flag_value "$1" $#; shift; answers_file="$1"; shift; continue ;;
       --answers-file=*) answers_file="${1#*=}"; shift; continue ;;
       --emit-github-ruleset) emit_gh_ruleset=1; shift; continue ;;
       --emit-github-workflow) emit_gh_workflow=1; shift; continue ;;
@@ -2040,7 +2300,9 @@ cmd_config() {
     if [ -f "$wf" ]; then
       if shiplog_can_use_bosun; then
         local bosun; bosun=$(shiplog_bosun_bin)
-        "$bosun" style --title "GitHub Workflow (verify)" -- "$(sed 's/\t/  /g' "$wf")"
+        # Literal tab via printf: BSD sed reads `\t` as the letter t and would strip
+        # every "t" from the YAML (#139 E).
+        "$bosun" style --title "GitHub Workflow (verify)" -- "$(sed "s/$(printf '\t')/  /g" "$wf")"
       else
         printf '\n# GitHub Workflow (verify)\n'
         cat "$wf"
@@ -2087,6 +2349,7 @@ A structured deployment logging tool for Git repositories.
 
 Usage:
   $cmd [GLOBAL_OPTIONS] <command> [COMMAND_OPTIONS]
+  $cmd <command> --help      Show the options of one command
 
   Commands:
   version             Print Shiplog version
@@ -2176,6 +2439,12 @@ run_command() {
 cmd_validate_trailer() {
   ensure_in_repo
   need jq
+  case "${1:-}" in
+    --help|-h)
+      printf 'Usage: git shiplog validate-trailer [COMMIT|REF]\n\nValidate the JSON trailer of one entry (defaults to the latest entry of the current environment).\n'
+      return 0 ;;
+    -*) die "shiplog: unknown validate-trailer option: $1 (see git shiplog validate-trailer --help)" ;;
+  esac
   local target="${1:-}"
   if [ -z "$target" ]; then
     target="$(ref_journal "$DEFAULT_ENV")"

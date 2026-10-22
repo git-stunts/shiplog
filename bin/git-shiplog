@@ -145,11 +145,23 @@ run_with_global_flags() {
         shift
         ;;
       --help|-h)
+        # Global help only before the subcommand name; afterwards the subcommand
+        # owns --help so `git shiplog write --help` prints the write usage (#119).
+        if [ ${#args[@]} -gt 0 ]; then
+          args+=("$1")
+          shift
+          continue
+        fi
         usage
         exit 0
         ;;
       --)
-        shift
+        # Before the subcommand `--` only ends global flag parsing. After it, the
+        # separator belongs to the subcommand (`run -- --flag` wraps a command whose
+        # first word starts with `-`, #139 C), so it is passed through intact.
+        if [ ${#args[@]} -eq 0 ]; then
+          shift
+        fi
         args+=("$@")
         break
         ;;
