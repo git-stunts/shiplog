@@ -62,10 +62,8 @@ jobs:
               exit 0
             fi
             files='${{ steps.changed-shell.outputs.all_changed_files }}'
-            echo "Changed shell files (raw):
-          $files"
-            mapfile -t SH_FILES < <(printf '%s
-          ' "$files")
+            printf 'Changed shell files (raw):\n%s\n' "$files"
+            mapfile -t SH_FILES < <(printf '%s\n' "$files")
             shellcheck -S error -s bash "${SH_FILES[@]}"
           else
             # On push (e.g., main), lint every tracked shell file. Files are
@@ -119,7 +117,7 @@ jobs:
             fi
             # Lint only changed Markdown files (avoids baseline noise)
             files='${{ steps.changed-markdown.outputs.all_changed_files }}'
-            echo "Changed files (raw):\n$files"
+            printf 'Changed files (raw):\n%s\n' "$files"
             # Filter out docs/tasks/** except docs/tasks/README.md
             filtered=()
             while IFS= read -r f; do
