@@ -14,7 +14,6 @@ jobs:
     outputs:
       shell: ${{ steps.filter.outputs.shell }}
       markdown: ${{ steps.filter.outputs.markdown }}
-      policy: ${{ steps.filter.outputs.policy }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -24,14 +23,12 @@ jobs:
             shell:
               - 'bin/git-shiplog'
               - 'contrib/hooks/**'
+              - 'scripts/bosun'
+              - 'scripts/dev/**'
               - '**/*.sh'
+              - '**/*.bash'
             markdown:
               - '**/*.md'
-            policy:
-              - '.shiplog/policy.json'
-              - 'examples/policy.schema.json'
-              - 'examples/**/*.policy.json'
-              - 'docs/**/*.policy.json'
   shellcheck:
     runs-on: ubuntu-latest
     needs: changes
@@ -51,7 +48,10 @@ jobs:
           files: |
             bin/git-shiplog
             contrib/hooks/**
+            scripts/bosun
+            scripts/dev/**
             **/*.sh
+            **/*.bash
       - name: Run shellcheck
         run: |
           set -euo pipefail
@@ -63,15 +63,25 @@ jobs:
             fi
             files='${{ steps.changed-shell.outputs.all_changed_files }}'
             echo "Changed shell files (raw):
-$files"
+          $files"
             mapfile -t SH_FILES < <(printf '%s
-' "$files")
+          ' "$files")
             shellcheck -S error -s bash "${SH_FILES[@]}"
           else
-            # On push (e.g., main), lint entire repo (include nested hooks)
-            mapfile -t SH_FILES < <(git ls-files | grep -E '(^bin/git-shiplog$|^contrib/hooks(/.*)?$|\.sh$)' || true)
+            # On push (e.g., main), lint every tracked shell file. Files are
+            # selected by bash shebang (covers extensionless scripts such as
+            # scripts/bosun, #146) plus the extension-based set, deduplicated.
+            # Dockerfiles carry bash shebangs inside heredocs and are excluded.
+            mapfile -t SH_FILES < <(
+              {
+                git grep -l -E '^#!.*\bbash\b' -- . ':!docs' ':!*.md' ':!*.bats' ':!Dockerfile' ':!*/Dockerfile'
+                git ls-files | grep -E '(^bin/git-shiplog$|^contrib/hooks(/.*)?$|^scripts/bosun$|\.sh$|\.bash$)' || true
+              } | sort -u
+            )
             if [ "${#SH_FILES[@]}" -eq 0 ]; then
               echo "No shell files found"; exit 0; fi
+            printf 'Linting %d shell files:\n' "${#SH_FILES[@]}"
+            printf '  %s\n' "${SH_FILES[@]}"
             shellcheck -S error -s bash "${SH_FILES[@]}"
           fi
 
@@ -126,20 +136,24 @@ $files"
             printf 'Linting files:%s\n' "\n${filtered[*]}"
             markdownlint "${filtered[@]}"
           else
-            # On push (e.g., main), lint entire repo
+            # On push (e.g., main), lint the Markdown files changed by the push.
+            # ':(glob)**/*.md' matches root-level files too; a plain '**/*.md'
+            # pathspec requires a literal '/' and skipped README.md (#146).
             # TODO: switch to full-repo markdownlint-cli2 once baseline is clean
-            files=$(git diff --name-only HEAD~1 -- '**/*.md' || true)
+            files=$(git diff --name-only HEAD~1 -- ':(glob)**/*.md' || true)
             if [ -z "$files" ]; then echo "No markdown changes on push."; exit 0; fi
             filtered=()
             while IFS= read -r f; do
               case "$f" in
                 docs/tasks/README.md) filtered+=("$f") ;;
-                docs/tasks/*) ;; 
+                docs/tasks/*) ;;
                 *.md) filtered+=("$f") ;;
               esac
             done <<< "$files"
             if [ "${#filtered[@]}" -eq 0 ]; then
               echo "No lintable markdown changes on push."; exit 0; fi
+            printf 'Linting files:\n'
+            printf '  %s\n' "${filtered[@]}"
             markdownlint "${filtered[@]}"
           fi
 
@@ -161,10 +175,14 @@ $files"
             yamllint -f github "${files[@]}"
           fi
 
+  # Policy JSON against examples/policy.schema.json (#133). Always runs: the
+  # inputs are small and a job that only runs when it thinks something
+  # changed cannot prove it validates anything. Three assertions:
+  #   1. every real policy file and valid fixture is accepted;
+  #   2. every invalid fixture is rejected (proves the validator runs);
+  #   3. an empty input list is a failure, not a skip.
   policy_schema:
     runs-on: ubuntu-latest
-    needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.policy == 'true'
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node
@@ -172,32 +190,88 @@ $files"
         with:
           node-version: '20'
       - name: Install ajv-cli
-        run: npm install -g ajv-cli
-      - name: Detect policy/schema changes (PRs)
-        if: github.event_name == 'pull_request'
-        id: changed-policy
-        uses: tj-actions/changed-files@v45
-        with:
-          separator: "\n"
-          files: |
-            examples/policy.schema.json
-            .shiplog/policy.json
-            docs/features/policy.md
-            docs/**/*.policy.json
+        run: npm install -g ajv-cli@5
       - name: Validate policy files against schema
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if [ "${{ steps.changed-policy.outputs.any_changed }}" != "true" ]; then
-              echo "No policy/schema changes; skipping AJV."
-              exit 0
+          schema=examples/policy.schema.json
+          [ -f "$schema" ] || { echo "::error::missing $schema"; exit 1; }
+          shopt -s nullglob
+          valid=( examples/policy.json test/fixtures/policy/valid/*.json )
+          [ -f .shiplog/policy.json ] && valid+=( .shiplog/policy.json )
+          invalid=( test/fixtures/policy/invalid/*.json )
+          if [ ${#valid[@]} -eq 0 ]; then
+            echo "::error::no policy files to validate (examples/policy.json, test/fixtures/policy/valid/*.json)"
+            exit 1
+          fi
+          if [ ${#invalid[@]} -eq 0 ]; then
+            echo "::error::no negative fixtures under test/fixtures/policy/invalid/"
+            exit 1
+          fi
+          failed=0
+          echo "Expecting ${#valid[@]} file(s) to validate:"
+          for f in "${valid[@]}"; do
+            if ajv validate --spec=draft2020 -s "$schema" -d "$f" >/dev/null 2>&1; then
+              echo "  ok       $f"
+            else
+              echo "::error file=$f::$f does not validate against $schema"
+              ajv validate --spec=draft2020 -s "$schema" -d "$f" 2>&1 | sed 's/^/    /' || true
+              failed=1
             fi
+          done
+          echo "Expecting ${#invalid[@]} fixture(s) to be rejected:"
+          for f in "${invalid[@]}"; do
+            if ajv validate --spec=draft2020 -s "$schema" -d "$f" >/dev/null 2>&1; then
+              echo "::error file=$f::$f is an invalid fixture but the schema accepted it"
+              failed=1
+            else
+              echo "  rejected $f"
+            fi
+          done
+          exit "$failed"
+
+  # Test-harness hygiene (#132, #148). Cheap text checks that keep the Bats
+  # suite honest without running it: unique file numbers, portable shebangs,
+  # the Makefile forwarding the documented knobs, one timeout default.
+  test_hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test file numbers are unique
+        run: |
+          set -euo pipefail
+          dups=$(ls test/*.bats | sed -E 's|test/([0-9]+)_.*|\1|' | sort | uniq -d || true)
+          if [ -n "$dups" ]; then
+            echo "::error::duplicate test file numbers: $(echo "$dups" | tr '\n' ' ')"
+            ls test/*.bats | grep -E "test/($(echo "$dups" | paste -sd'|' -))_"
+            exit 1
           fi
-          echo "Validating policy files with ajv"
-          shopt -s globstar nullglob
-          files=( .shiplog/policy.json docs/**/*.policy.json examples/**/*.policy.json )
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No policy files found; skipping."
-            exit 0
+          echo "Test file numbers are unique."
+      - name: No hard-coded /bin/bash under test/
+        run: |
+          set -euo pipefail
+          if grep -rn '/bin/bash' test/ | grep -v 'env bash'; then
+            echo "::error::use '#!/usr/bin/env bash' (or 'env bash') instead of /bin/bash under test/"
+            exit 1
           fi
-          ajv validate --spec=draft2020 -s examples/policy.schema.json -d "${files[@]}"
+          echo "No hard-coded /bin/bash under test/."
+      - name: Makefile forwards test knobs into the container
+        run: |
+          set -euo pipefail
+          out=$(make -n test TEST_TIMEOUT_SECS=5 SHIPLOG_USE_LOCAL_SANDBOX=1 BATS_FLAGS='-r -T')
+          for needle in '-e TEST_TIMEOUT_SECS="5"' '-e SHIPLOG_USE_LOCAL_SANDBOX="1"' '-e BATS_FLAGS="-r -T"'; do
+            if ! grep -qF -- "$needle" <<<"$out"; then
+              echo "::error::make test does not pass $needle to docker run"
+              echo "$out"
+              exit 1
+            fi
+          done
+          echo "make test forwards TEST_TIMEOUT_SECS, SHIPLOG_USE_LOCAL_SANDBOX and BATS_FLAGS."
+      - name: One timeout default (none) across the runners
+        run: |
+          set -euo pipefail
+          if grep -n 'TEST_TIMEOUT_SECS:-[0-9]' test.sh Dockerfile ci-matrix/Dockerfile; then
+            echo "::error::a runner hard-codes a TEST_TIMEOUT_SECS default; the suite runs with no timeout unless the caller opts in"
+            exit 1
+          fi
+          echo "No runner hard-codes a timeout default."

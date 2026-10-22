@@ -201,7 +201,7 @@ Choose how maintainer approval is expressed. Both are supported.
 
 | Question | Answer |
 |----------|--------|
-| What is AJV and why does CI mention it? | AJV is a fast JSON Schema validator for Node.js. CI uses it to validate `.shiplog/policy.json` against its schema. Locally, `git shiplog policy validate` performs `jq` checks. |
+| What is AJV and why does CI mention it? | AJV is a fast JSON Schema validator for Node.js. CI uses it to validate `examples/policy.json`, the fixtures under `test/fixtures/policy/valid/`, and `.shiplog/policy.json` when present against `examples/policy.schema.json`, and asserts that the fixtures under `test/fixtures/policy/invalid/` are rejected. Locally, `git shiplog policy validate` performs `jq` checks. |
 |Can Shiplog enforce policy on GitHub.com (SaaS)? | Yes, but via **Branch/Push Rulesets + Required Checks** and a branch namespace for Shiplog refs, as SaaS doesn't run custom server hooks. | 
 | Which trust mode should I use? | **Chain** if maintainers can sign commits; **attestation** if signatures come from automation/SSH. Both are fully supported. | 
 
