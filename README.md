@@ -139,6 +139,8 @@ Humans read the top. Machines read the bottom. `seq` and `journal_parent` chain 
 
 Full trailer schema: [`docs/reference/json-schema.md`](./docs/reference/json-schema.md).
 
+All of these hang off one ref root, `refs/_shiplog` by default. `SHIPLOG_REF_ROOT` or `git config shiplog.refRoot` moves every ref together (for example to the branch namespace `refs/heads/_shiplog`); the server hook reads `SHIPLOG_REF_ROOT` from its own environment. `git shiplog refs root show` prints the effective root and where it came from; `git shiplog refs migrate --to <root>` moves existing refs.
+
 ---
 
 ## Policy and trust
@@ -156,7 +158,9 @@ Two files, both in refs, both reviewed like code.
 }
 ```
 
-**Trust** (`trust.json` + `allowed_signers`) says who the maintainers are, their SSH public keys, and how many of them must approve a change to the roster itself.
+Each field resolves env → `git config` → policy document → default; per-environment values resolve `deployment_requirements.<env>` → `deployment_requirements.default` → top level, and the server hook uses the same order for `require_signed`. Details: [`docs/features/policy.md`](./docs/features/policy.md#precedence).
+
+**Trust** (`trust.json` + `allowed_signers`) says who the maintainers are, their SSH public keys, and how many of them must approve a change to the roster itself. For N-of-M approval use `sig_mode: attestation`: each maintainer signs a detached SSH attestation over the update. `sig_mode: chain` is a single signed trust commit and supports threshold 1 only.
 
 ```bash
 git shiplog setup --strictness balanced     # guided: open / balanced / strict
