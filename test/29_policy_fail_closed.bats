@@ -53,6 +53,7 @@ drop_signers() {
   [[ "$output" == *"not valid JSON"* ]]
   run git shiplog --boring --yes write
   [ "$status" -ne 0 ]
+  [[ "$output" == *"not valid JSON"* ]]
   run git show-ref refs/_shiplog/journal/prod
   [ "$status" -ne 0 ]
 }
@@ -137,6 +138,11 @@ drop_signers() {
   run env SHIPLOG_SIGN=0 SHIPLOG_DRY_RUN=perhaps git shiplog --boring --yes write
   [ "$status" -ne 0 ]
   [[ "$output" == *"SHIPLOG_DRY_RUN"* ]]
+  # Positive control: --dry-run=False really writes, so the checks above are not vacuous.
+  run env SHIPLOG_SIGN=0 git shiplog --boring --yes write --dry-run=False
+  [ "$status" -eq 0 ]
+  run git show-ref refs/_shiplog/journal/prod
+  [ "$status" -eq 0 ]
 }
 
 @test "SLT.BUG.CLI.009: SHIPLOG_AUTO_PUSH=sometimes is rejected" {
