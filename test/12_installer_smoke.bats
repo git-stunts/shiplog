@@ -408,3 +408,37 @@ make_restricted_path() {
   run git show-ref --verify --quiet refs/heads/_shiplog/smoke
   [ "$status" -ne 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# Guard hardening (Code Lawyer pass on #166)
+# ---------------------------------------------------------------------------
+
+@test "destructive guard takes checkout evidence from DIR itself, not an enclosing repo or GIT_DIR" {
+  local outer="$HOME/outer"
+  make_fake_checkout "$outer" "$UPSTREAM_URL"
+  local inner="$outer/inner"
+  mkdir -p "$inner/bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$inner/bin/git-shiplog"
+  : > "$inner/sentinel"
+
+  # inner has bin/git-shiplog but no .git; git -C would find outer's origin.
+  SHIPLOG_HOME="$inner" run env -u SHIPLOG_REPO_URL bash "$UNINSTALLER" --dry-run --silent
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not a Shiplog checkout"* ]]
+  [[ "$output" != *"rm -rf"* ]]
+
+  # A plain dir must not borrow the origin of an exported GIT_DIR either.
+  local plain="$HOME/plain"
+  mkdir -p "$plain/bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$plain/bin/git-shiplog"
+  SHIPLOG_HOME="$plain" run env -u SHIPLOG_REPO_URL GIT_DIR="$outer/.git" bash "$UNINSTALLER" --dry-run --silent
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not a Shiplog checkout"* ]]
+  [[ "$output" != *"rm -rf"* ]]
+  [ -f "$inner/sentinel" ]
+
+  # Positive control: the real checkout itself is accepted.
+  SHIPLOG_HOME="$outer" run env -u SHIPLOG_REPO_URL bash "$UNINSTALLER" --dry-run --silent
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"+ rm -rf "*"outer"* ]]
+}

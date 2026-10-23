@@ -12,7 +12,7 @@
 #                  and the symlink rule. Use before creating DIR (git clone).
 #     destructive  Everything in "path", plus evidence that DIR is a Shiplog
 #                  checkout: DIR/bin/git-shiplog exists and
-#                  `git -C DIR config remote.origin.url` matches REPO_URL after
+#                  remote.origin.url in DIR/.git/config matches REPO_URL after
 #                  normalizing scheme, user, ".git" suffix and trailing slash.
 #                  Use before `git reset --hard`, `rm -rf` and similar.
 #
@@ -179,8 +179,15 @@ shiplog_guard_install_dir() {
       echo "$label: not a Shiplog checkout: $dir (missing bin/git-shiplog)" >&2
       return 1
     fi
+    # Evidence must come from DIR itself: read DIR/.git/config directly so an
+    # enclosing repository, an exported GIT_DIR or GIT_CONFIG_* cannot vouch
+    # for a directory that is not itself a Shiplog clone.
+    if [ -L "$dir/.git" ] || [ ! -d "$dir/.git" ] || [ ! -f "$dir/.git/config" ]; then
+      echo "$label: not a Shiplog checkout: $dir (no .git directory of its own)" >&2
+      return 1
+    fi
     local origin_url
-    origin_url=$(git -C "$dir" config --get remote.origin.url 2>/dev/null || true)
+    origin_url=$(git config --file "$dir/.git/config" --get remote.origin.url 2>/dev/null || true)
     if [ -z "$origin_url" ]; then
       echo "$label: not a Shiplog checkout: $dir (no remote.origin.url)" >&2
       return 1
