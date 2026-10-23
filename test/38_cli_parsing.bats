@@ -346,6 +346,8 @@ line_count() {
   [ "$status" -eq 0 ]
   [ "$(line_count "$output")" -eq 1 ]
   printf '%s\n' "$output" | jq -e '.commit and .seq != null' >/dev/null
+  # The G6 notes field survives the per-entry rewrite
+  printf '%s\n' "$output" | jq -e '.notes.ref == "'"${REF_ROOT}"'/notes/logs" and (.notes.attached | type) == "boolean"' >/dev/null
 }
 
 @test "g7b show/validate-trailer: a target starting with - is rejected, never passed to git as an option" {
