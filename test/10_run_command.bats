@@ -50,7 +50,7 @@ teardown() {
 }
 
 @test "run propagates failure exit code and status" {
-  run bash -lc 'git shiplog run --service test --status-success done --status-failure failed -- false'
+  run bash -lc 'git shiplog run --service test --status-success finalize --status-failure failed -- false'
   [ "$status" -eq 1 ]
 
   sha=$(git rev-parse "${REF_ROOT}/journal/prod")
