@@ -243,3 +243,20 @@ reauthor_tip() {
   run git --git-dir="$REMOTE_DIR" rev-parse refs/_shiplog/journal/prod
   [ "$output" = "$(git rev-parse "$ref")" ]
 }
+
+# --- end to end: entries written by `run` pass the hook -----------------------
+
+@test "hook accepts entries written by run, including a failed command" {
+  git shiplog init >/dev/null
+  push_trust_ref
+  push_policy_ref
+  run git shiplog --boring --yes run --service hook-test --reason ok -- sh -c 'echo fine'
+  [ "$status" -eq 0 ]
+  run git shiplog --boring --yes run --service hook-test --reason boom -- sh -c 'echo broke >&2; exit 5'
+  [ "$status" -eq 5 ]
+  run bash -c "git shiplog show --json refs/_shiplog/journal/prod | jq -r '[.status, .run.status, (.run.exit_code|tostring), (.run.log_attached|tostring), (.seq|tostring)] | join(\" \")'"
+  [ "$output" = "failed failed 5 true 1" ]
+  run git push "$REMOTE_NAME" refs/_shiplog/journal/prod
+  [ "$status" -eq 0 ]
+  [ "$(git --git-dir="$REMOTE_DIR" rev-parse refs/_shiplog/journal/prod)" = "$(git rev-parse refs/_shiplog/journal/prod)" ]
+}
