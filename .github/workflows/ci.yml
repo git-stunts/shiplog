@@ -99,3 +99,79 @@ jobs:
             -e BATS_FLAGS='--filter-tags adversarial -r' \
             -e TEST_TIMEOUT_SECS=900 \
             -v "$PWD":/workspace shiplog-tests:ci
+
+  # ROADMAP G9: Shiplog ships Shiplog. The ledger lives under refs/heads/_shiplog/**
+  # (GitHub.com cannot run a pre-receive hook, so this check is the enforcement):
+  # every entry of the ci journal must come from an allowed author and verify
+  # against the published trust roster and policy. Required status check on main.
+  shiplog-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the ci journal against trust and policy
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin 'refs/heads/_shiplog/*:refs/heads/_shiplog/*'
+          git config shiplog.refRoot refs/heads/_shiplog
+          export SHIPLOG_HOME="$GITHUB_WORKSPACE" PATH="$GITHUB_WORKSPACE/bin:$PATH" SHIPLOG_BORING=1
+          # Every trust transition, genesis first, must satisfy the prior roster.
+          prev=0000000000000000000000000000000000000000
+          for c in $(git rev-list --reverse --first-parent refs/heads/_shiplog/trust/root); do
+            scripts/shiplog-verify-trust.sh --old "$prev" --new "$c" --ref refs/heads/_shiplog/trust/root
+            prev=$c
+          done
+          git shiplog trust sync
+          git shiplog policy validate --ref
+          git shiplog verify ci
+
+  # ROADMAP G9: record every main run in refs/heads/_shiplog/journal/ci, including
+  # failed ones (status "failed", exit code and a log note). Serialized so two
+  # runs never race for the same journal tip.
+  shiplog-record:
+    needs: [tests, adversarial]
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: shiplog-ledger-ci
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Record this run with git shiplog run
+        env:
+          TESTS_RESULT: ${{ needs.tests.result }}
+          ADVERSARIAL_RESULT: ${{ needs.adversarial.result }}
+          SHIPLOG_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHIPLOG_REMOTE: origin
+          SHIPLOG_SIGN: "0"
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin 'refs/heads/_shiplog/*:refs/heads/_shiplog/*'
+          git config shiplog.refRoot refs/heads/_shiplog
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          export SHIPLOG_HOME="$GITHUB_WORKSPACE" PATH="$GITHUB_WORKSPACE/bin:$PATH"
+          git shiplog trust sync
+          set +e
+          SHIPLOG_BORING=1 SHIPLOG_ASSUME_YES=1 git shiplog run --env ci --service shiplog-tests \
+            --reason "CI on main at ${GITHUB_SHA::12}: tests=${TESTS_RESULT} adversarial=${ADVERSARIAL_RESULT}" \
+            --status-success success --status-failure failed \
+            -- bash -c 'echo "tests: $TESTS_RESULT"; echo "adversarial: $ADVERSARIAL_RESULT"; [ "$TESTS_RESULT" = success ] && [ "$ADVERSARIAL_RESULT" = success ]'
+          echo "recorded run outcome: exit $?"
+          set -e
+          local_tip=$(git rev-parse refs/heads/_shiplog/journal/ci)
+          remote_tip=$(git ls-remote origin refs/heads/_shiplog/journal/ci | cut -f1)
+          [ "$local_tip" = "$remote_tip" ] || { echo "ci entry was not published (local $local_tip, remote ${remote_tip:-none})" >&2; exit 1; }
+          git shiplog verify ci

@@ -68,6 +68,16 @@ Migration sketch:
 2) Make sure every client uses the new root: the helper sets `git config shiplog.refRoot refs/heads/_shiplog` in the repo it ran in; other clones set it too, or export `SHIPLOG_REF_ROOT=refs/heads/_shiplog` (env wins over config).
 3) Update CI/automation to use the new ref names. Self-hosted servers running `contrib/hooks/pre-receive.shiplog` must export `SHIPLOG_REF_ROOT=refs/heads/_shiplog` in the hook environment, or the hook enforces nothing under the branch namespace.
 
+### Worked example: this repository (ROADMAP G9)
+
+`git-stunts/shiplog` runs Option B on itself:
+
+- Trust (`_shiplog/trust/root`), policy (`_shiplog/policy/current`) and the `ci` and `release` journals live under `refs/heads/_shiplog/**`; every clone sets `git config shiplog.refRoot refs/heads/_shiplog`.
+- Ruleset [`ruleset-branch-shiplog-append-only.json`](../examples/github/ruleset-branch-shiplog-append-only.json) (active, no bypass): deletion and non-fast-forward updates are blocked for everyone.
+- Ruleset [`ruleset-branch-shiplog-writers.json`](../examples/github/ruleset-branch-shiplog-writers.json) restricts creation and updates to admins and deploy keys. It is imported but **disabled** here: a repository ruleset cannot list the GitHub Actions app as a bypass actor, and deploy keys are disabled for the organization, so no CI identity could write. Enable it once CI pushes with a deploy key (or another bypassable identity).
+- Until then CI appends with the workflow's `GITHUB_TOKEN` (`contents: write`), and the `shiplog-verify` job in `.github/workflows/ci.yml` is a required status check on `main`: it verifies the trust chain, validates the policy ref and checks every `ci` entry's author against the policy allowlist, so an entry from anyone else turns every pull request red.
+- Import a ruleset: Settings → Rules → Rulesets → New ruleset → Import a ruleset, or `gh api -X POST repos/OWNER/REPO/rulesets --input <file>.json`.
+
 ## Switching Ref Root (Toggle Branch vs Custom Refs)
 
 Teams can switch between custom refs (`refs/_shiplog`) and branch namespace (`refs/heads/_shiplog`) per repo. Use the migration helper and update your config.

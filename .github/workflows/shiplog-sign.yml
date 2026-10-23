@@ -1,98 +1,75 @@
-name: Shiplog CI Signing
+name: Shiplog Release Entry
+
+# ROADMAP G9: every release tag is recorded in this repository's own ledger as a
+# signed entry in refs/heads/_shiplog/journal/release (policy: release requires
+# signatures). The entry is signed with the CI key listed in the trust roster
+# (ci@flyingrobots.dev), which can sign entries but cannot approve trust changes.
 
 on:
-  workflow_dispatch:
-    inputs:
-      env:
-        description: "Target environment (e.g., prod, staging)"
-        required: false
-        default: "prod"
-      service:
-        description: "Service name"
-        required: false
-        default: "release"
-      status:
-        description: "Status (success|failed|in_progress)"
-        required: false
-        default: "success"
-      reason:
-        description: "Reason/description"
-        required: false
-        default: "Automated CI entry"
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason recorded in the entry"
+        required: false
+        default: "Manual release entry"
 
 permissions:
   contents: write
 
+concurrency:
+  group: shiplog-ledger-release
+  cancel-in-progress: false
+
 jobs:
-  sign-entry:
+  record-release:
     runs-on: ubuntu-latest
-    environment:
-      name: ${{ github.event_name == 'workflow_dispatch' && inputs.env || 'prod' }}
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           fetch-depth: 0
 
-      - name: Install jq (if missing)
-        run: |
-          if ! command -v jq >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y jq
-          fi
+      - name: Fetch the ledger
+        run: git fetch --no-tags origin 'refs/heads/_shiplog/*:refs/heads/_shiplog/*'
 
-      - name: Configure SSH signing (CI)
+      - name: Configure Shiplog and SSH signing
         env:
           CI_SSH_PRIVATE_KEY: ${{ secrets.CI_SSH_PRIVATE_KEY }}
           CI_SSH_PUBLIC_KEY: ${{ vars.CI_SSH_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           [ -n "${CI_SSH_PRIVATE_KEY:-}" ] || { echo "Missing CI_SSH_PRIVATE_KEY secret" >&2; exit 1; }
-          [ -n "${CI_SSH_PUBLIC_KEY:-}" ] || { echo "Missing CI_SSH_PUBLIC_KEY env" >&2; exit 1; }
+          [ -n "${CI_SSH_PUBLIC_KEY:-}" ] || { echo "Missing CI_SSH_PUBLIC_KEY variable" >&2; exit 1; }
           umask 077
           mkdir -p ~/.ssh
           printf '%s\n' "$CI_SSH_PRIVATE_KEY" > ~/.ssh/id_shiplog_ci_ed25519
           printf '%s\n' "$CI_SSH_PUBLIC_KEY" > ~/.ssh/id_shiplog_ci_ed25519.pub
-          git config --global gpg.format ssh
-          git config --global user.signingkey ~/.ssh/id_shiplog_ci_ed25519
-          git config --global user.name "Sea Eye"
-          git config --global user.email "ci@flyingrobots.dev"
+          git config gpg.format ssh
+          git config user.signingkey ~/.ssh/id_shiplog_ci_ed25519
+          git config user.name "Sea Eye"
+          git config user.email "ci@flyingrobots.dev"
+          git config shiplog.refRoot refs/heads/_shiplog
+          echo "SHIPLOG_HOME=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+          SHIPLOG_HOME="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/bin/git-shiplog" trust sync
 
-      - name: Prepare Shiplog environment
-        run: |
-          echo "::group::Fetch Shiplog refs"
-          git fetch origin '+refs/_shiplog/*:refs/_shiplog/*' --prune || true
-          echo "::endgroup::"
-          echo "::group::Set SHIPLOG paths"
-          echo "SHIPLOG_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "SHIPLOG_LIB_DIR=$GITHUB_WORKSPACE/lib" >> $GITHUB_ENV
-          echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
-          echo "::endgroup::"
-
-      - name: Sync allowed signers from trust
-        run: |
-          set -euo pipefail
-          ./scripts/shiplog-trust-sync.sh
-
-      - name: Write Shiplog entry
+      - name: Record the signed release entry
         env:
-          SHIPLOG_ENV: ${{ inputs.env || 'prod' }}
-          SHIPLOG_SERVICE: ${{ inputs.service || 'release' }}
-          SHIPLOG_STATUS: ${{ inputs.status || 'success' }}
-          SHIPLOG_REASON: ${{ inputs.reason || format('Tag {0}', github.ref_name) }}
-          SHIPLOG_BORING: 1
-          SHIPLOG_ASSUME_YES: 1
+          SHIPLOG_SERVICE: shiplog
+          SHIPLOG_STATUS: success
+          SHIPLOG_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.reason || format('Release {0}', github.ref_name) }}
+          SHIPLOG_TAG: ${{ github.ref_name }}
+          SHIPLOG_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHIPLOG_SIGN: "1"
+          SHIPLOG_REMOTE: origin
         run: |
           set -euo pipefail
-          git shiplog init
-          git shiplog --boring --yes write
-
-      - name: Push Shiplog journal
-        env:
-          SHIPLOG_ENV: ${{ inputs.env || 'prod' }}
-        run: |
-          set -euo pipefail
-          git push origin "refs/_shiplog/journal/${SHIPLOG_ENV}"
+          git shiplog --boring --yes write release
+          git shiplog verify release
+          local_tip=$(git rev-parse refs/heads/_shiplog/journal/release)
+          remote_tip=$(git ls-remote origin refs/heads/_shiplog/journal/release | cut -f1)
+          [ "$local_tip" = "$remote_tip" ] || { echo "release entry was not published (local $local_tip, remote ${remote_tip:-none})" >&2; exit 1; }

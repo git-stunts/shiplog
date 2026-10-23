@@ -13,13 +13,31 @@ Ship it. Then prove you shipped it.
 ## Dry dock
 
 > [!IMPORTANT]
-> **Shiplog is in dry dock.** A full audit on 2026-10-21 found that the hull was sound and the locks were not: the storage layer (refs, trailers, compare-and-swap updates, fast-forward checks) passed review; the *enforcement* layer (trust quorum, signature verification, the pre-receive hook) had P0 defects. The locks have since been rebuilt (roadmap G2 and G3): one shared trust verifier, prior-roster checks, a key-based N-of-M quorum, refused ref deletion and signed policy updates, proven by the adversarial suite `test/27_trust_adversarial.bats`, which now blocks CI. Still open: a few policy, ref-root and CLI issues, dogfooding (G9) and the 0.5.0 release (G10).
+> **Shiplog is in dry dock.** A full audit on 2026-10-21 found that the hull was sound and the locks were not: the storage layer (refs, trailers, compare-and-swap updates, fast-forward checks) passed review; the *enforcement* layer (trust quorum, signature verification, the pre-receive hook) had P0 defects. The locks have since been rebuilt (roadmap G2 and G3): one shared trust verifier, prior-roster checks, a key-based N-of-M quorum, refused ref deletion and signed policy updates, proven by the adversarial suite `test/27_trust_adversarial.bats`, which now blocks CI. Policy resolution, the single ref root and the CLI fixes (G5–G7) have landed too. Still open: dogfooding (G9; this repository now records its own CI runs, see [Shiplog ships Shiplog](#shiplog-ships-shiplog)) and the 0.5.0 release (G10).
 >
 > **Use Shiplog today as a ledger.** Do not make it your only access-control system until it leaves dry dock.
 >
 > Plan: [`ROADMAP.md`](./ROADMAP.md) · live status: [tracking issue #155](https://github.com/git-stunts/shiplog/issues/155) · what's wrong, in detail: issues labeled [`audit-2026-10`](https://github.com/git-stunts/shiplog/issues?q=label%3Aaudit-2026-10). This section flips to "seaworthy" with release 0.5.0 (G10): every `audit-2026-10` issue closed and `test/27_trust_adversarial.bats` blocking and green. Not before.
 
 ---
+
+## Shiplog ships Shiplog
+
+This repository records its own CI in its own ledger, on GitHub.com, under the branch namespace:
+
+- Every run of CI on `main` appends an entry to [`_shiplog/journal/ci`](https://github.com/git-stunts/shiplog/commits/_shiplog/journal/ci) with `git shiplog run`, including failed runs (status `failed`, exit code, log note).
+- Every release tag appends a signed entry to `_shiplog/journal/release`.
+- Pull requests must pass the `shiplog-verify` check: the trust chain, the policy and every `ci` entry are verified, because GitHub.com cannot run a pre-receive hook.
+- A ruleset makes `_shiplog/**` append-only: no deletions, no force-pushes.
+
+Read it yourself:
+
+```bash
+git fetch origin 'refs/heads/_shiplog/*:refs/heads/_shiplog/*'
+git config shiplog.refRoot refs/heads/_shiplog
+git shiplog ls ci
+git shiplog verify ci
+```
 
 ## The 2 a.m. problem
 
