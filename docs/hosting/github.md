@@ -46,6 +46,7 @@ Some plans allow rulesets targeting arbitrary ref names. Use a “push” rulese
   - Optional: `required_signatures` (GitHub verification; see caveat below)
 
 Validate:
+
 - Try deleting a journal ref: `git push origin :refs/_shiplog/journal/prod` → should be rejected with a ruleset message.
 
 ### Option B — Use Branch Namespace to Leverage Branch Rules
@@ -61,12 +62,23 @@ If your plan cannot protect arbitrary refs, move Shiplog refs under branches so 
 - Then create a Branch ruleset targeting `_shiplog/**` with the same rules: block deletion, non-FF, require linear history.
 
 Migration sketch:
+
 1) Mirror current tips to the new namespace and push them (the helper handles every ref kind, nested names included, and records the new root in `git config shiplog.refRoot`):
    - `git shiplog refs migrate --to refs/heads/_shiplog --dry-run` (preview)
    - `git shiplog refs migrate --to refs/heads/_shiplog --push`
    - Avoid hand-rolled `git for-each-ref 'refs/_shiplog/*'` loops: `*` does not cross `/`, so `journal/<env>`, `policy/current`, `trust/root` and `notes/logs` are skipped.
 2) Make sure every client uses the new root: the helper sets `git config shiplog.refRoot refs/heads/_shiplog` in the repo it ran in; other clones set it too, or export `SHIPLOG_REF_ROOT=refs/heads/_shiplog` (env wins over config).
 3) Update CI/automation to use the new ref names. Self-hosted servers running `contrib/hooks/pre-receive.shiplog` must export `SHIPLOG_REF_ROOT=refs/heads/_shiplog` in the hook environment, or the hook enforces nothing under the branch namespace.
+
+### Worked example: this repository (ROADMAP G9)
+
+`git-stunts/shiplog` runs Option B on itself:
+
+- Trust (`_shiplog/trust/root`), policy (`_shiplog/policy/current`) and the `ci` and `release` journals live under `refs/heads/_shiplog/**`; every clone sets `git config shiplog.refRoot refs/heads/_shiplog`.
+- Ruleset [`ruleset-branch-shiplog-append-only.json`](../examples/github/ruleset-branch-shiplog-append-only.json) (active, no bypass): deletion and non-fast-forward updates are blocked for everyone.
+- Ruleset [`ruleset-branch-shiplog-writers.json`](../examples/github/ruleset-branch-shiplog-writers.json) restricts creation and updates to admins and deploy keys. It is imported but **disabled** here: a repository ruleset cannot list the GitHub Actions app as a bypass actor, and deploy keys are disabled for the organization, so no CI identity could write. Enable it once CI pushes with a deploy key (or another bypassable identity).
+- Until then CI appends with the workflow's `GITHUB_TOKEN` (`contents: write`), and the `shiplog-verify` job in `.github/workflows/ci.yml` is a required status check on `main`: it verifies the trust chain, validates the policy ref and checks every `ci` entry's author against the policy allowlist, so an entry from anyone else turns every pull request red.
+- Import a ruleset: Settings → Rules → Rulesets → New ruleset → Import a ruleset, or `gh api -X POST repos/OWNER/REPO/rulesets --input <file>.json`.
 
 ## Switching Ref Root (Toggle Branch vs Custom Refs)
 
