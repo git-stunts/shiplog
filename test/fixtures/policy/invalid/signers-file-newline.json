@@ -1,0 +1,4 @@
+{
+  "version": "1.0.0",
+  "allow_ssh_signers_file": ".shiplog/allowed_signers\nrefs/_shiplog/notes/evil"
+}

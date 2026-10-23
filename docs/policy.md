@@ -16,16 +16,18 @@ ajv validate --spec=draft2020 --schema examples/policy.schema.json --data .shipl
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema` | string | Optional URI reference to the JSON Schema used for validation (e.g., "https://example.com/policy.schema.json"). |
-| `version` | string (`major.minor.patch`) | Policy format version (e.g., `1.0.0`). |
+| `version` | string (`major.minor.patch`) | Policy format version (e.g., `1.0.0`). Canonical semver: no leading zeros. |
 | `format_compat` | string | Semantic version range indicating compatible policy parsers (e.g., ">=1.0.0 <2.0.0"). |
-| `require_signed` | boolean | Require signatures for journal entries. |
-| `allow_ssh_signers_file` | string | Path to SSH allowed signers file (relative paths resolve from repo root). |
-| `authors` | object | Optional but recommended; defines which email addresses may author Shiplog entries (with optional per-environment overrides). |
+| `require_signed` | boolean | Require signatures for journal entries. Must be a JSON boolean; strings such as `"yes"` are rejected by the validator and by the CLI. |
+| `allow_ssh_signers_file` | string | Path to SSH allowed signers file (relative paths resolve from the repository root). Takes precedence over the per-user `gpg.ssh.allowedSignersFile`, which is only a fallback. |
+| `authors` | object | Optional but recommended; defines which email addresses may author Shiplog entries (with optional per-environment overrides). Only `default_allowlist` and `env_overrides` are accepted. |
 | `deployment_requirements` | object | Per-environment guardrails for Shiplog entries. |
-| `ff_only` | boolean | Enforce fast-forward updates to Shiplog refs. |
+| `ff_only` | boolean | *Roadmap: validated but not yet enforced (see #79).* Fast-forward-only updates are always enforced by the pre-receive hook. |
 | `notes_ref` | string | Git notes ref storing log attachments. |
-| `journals_ref_prefix` | string | Prefix for journal refs (usually `refs/_shiplog/journal/`). |
-| `anchors_ref_prefix` | string | Prefix for anchor refs (usually `refs/_shiplog/anchors/`). |
+| `journals_ref_prefix` | string | **Reserved; not yet honored.** Journal refs derive from the ref root (`SHIPLOG_REF_ROOT` / `shiplog.refRoot`). Accepted for forward compatibility only. |
+| `anchors_ref_prefix` | string | **Reserved; not yet honored.** Anchor refs derive from the ref root. Accepted for forward compatibility only. |
+
+Unknown keys are rejected at the top level, inside `authors`, and inside every `deployment_requirements.<env>` entry.
 ## Authors
 
 ```json
@@ -51,17 +53,20 @@ Each key under `deployment_requirements` corresponds to an environment name (e.g
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `require_ticket` | boolean | Require a ticket identifier in Shiplog entries. |
-| `require_service` | boolean | Require the service field to be present. |
-| `require_where` | array | Require specific `where` attributes (allowed values: `region`, `cluster`, `namespace`, `service`, `environment`). |
+| `require_signed` | boolean | Require signatures for this environment. Enforced by the CLI and the pre-receive hook. |
+| `require_ticket` | boolean | Require a ticket identifier in Shiplog entries. *Roadmap: not yet enforced (see #79).* |
+| `require_service` | boolean | Require the service field to be present. *Roadmap: not yet enforced (see #79).* |
+| `require_where` | array | Require specific `where` attributes (allowed values: `region`, `cluster`, `namespace`, `service`, `environment`). *Roadmap: not yet enforced (see #79).* |
 
-Missing fields inherit from the `default` entry when present.
+Lookup order for each per-environment field: `deployment_requirements.<env>.<field>` when present (an explicit `false` counts), then `deployment_requirements.default.<field>`, then the top-level field, then the built-in default. The CLI resolves the environment named on the command (`write prod`, `verify staging`, `--env`), not the default environment. The pre-receive hook resolves `require_signed` in the same order (#127).
 
 ## Validation Tips
 
 - Run `ajv validate -s examples/policy.schema.json -d .shiplog/policy.json` in CI to block invalid policies.
 - If `require_signed` is `true`, ensure `allow_ssh_signers_file` exists and is readable by automation.
 - Keep semantic versioning consistent to signal breaking policy format changes.
-- Before committing or publishing `.shiplog/policy.json`, run `scripts/policy/validate.sh` or `git shiplog policy validate`.
+- Before committing or publishing `.shiplog/policy.json`, run `scripts/policy/validate.sh` or `git shiplog policy validate`. The CLI validates the working-tree file when it exists (and notes when it differs from the published ref); use `--ref` to check the published policy or `--file PATH` for any file.
+- `scripts/shiplog-sync-policy.sh` runs the same validator and refuses to publish an invalid document. It signs the policy commit when `git config user.signingkey` is set (override with `SHIPLOG_POLICY_SIGN=1|0`).
 - Once a trust ref exists on the server, the pre-receive hook accepts a policy update only when the commit is signed by a current maintainer of the trust roster, contains `.shiplog/policy.json`, and passes the validator (`SHIPLOG_REQUIRE_SIGNED_POLICY`; see `docs/TRUST.md`). Publish with `SHIPLOG_POLICY_SIGN=1 scripts/shiplog-sync-policy.sh`.
+- A policy document that fails validation stops `write`, `run`, `append`, `verify` and `policy show`; Shiplog never falls back to the permissive defaults while a broken document exists.
 - The validator enforces canonical semver versions and optional-field rules defined in `scripts/lib/policy_validate.jq`, so failing locally prevents broken pushes.

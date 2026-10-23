@@ -76,9 +76,11 @@ exports an absolute `GIT_DIR` before running the verifier.
   runs, for SaaS required checks. Exit 0 = accept.
 - `scripts/shiplog-trust-sign.sh [--principal you@example.com] [--message-only] <commit>` – create an attestation
   (`.shiplog/trust_sigs/<principal>.sig`) over the canonical payload, or print that payload.
-- `scripts/shiplog-sync-policy.sh` – publishes `.shiplog/policy.json` to the policy ref as a fast-forward commit
-  (does not push). Set `SHIPLOG_POLICY_SIGN=1` so the commit is signed by a maintainer, which the hook requires
-  once a trust ref exists:
+- `scripts/shiplog-sync-policy.sh` – validates `.shiplog/policy.json` with `scripts/policy/validate.sh` (aborting
+  on failure) and publishes it to the policy ref as a fast-forward commit (does not push). The commit is signed
+  when `git config user.signingkey` is set or `SHIPLOG_POLICY_SIGN=1`; otherwise it is unsigned and a hint is
+  printed. Once a trust ref exists the hook requires the policy commit to be signed by a maintainer, so set
+  `SHIPLOG_POLICY_SIGN=1` to fail rather than publish unsigned:
 
 ```bash
 SHIPLOG_POLICY_SIGN=1 ./scripts/shiplog-sync-policy.sh

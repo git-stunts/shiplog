@@ -10,11 +10,20 @@
     "schema": { "type": "string" },
     "version": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+      "description": "Canonical semver (no leading zeros); the same pattern is enforced by scripts/lib/policy_validate.jq.",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
     },
     "format_compat": { "type": "string" },
-    "require_signed": { "type": "boolean" },
-    "allow_ssh_signers_file": { "type": "string", "minLength": 1 },
+    "require_signed": {
+      "type": "boolean",
+      "description": "Require signed journal entries. Per-environment lookup: deployment_requirements.<env>.require_signed, then deployment_requirements.default.require_signed, then this field."
+    },
+    "allow_ssh_signers_file": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+      "description": "Allowed signers file; relative paths resolve from the repository root. Beats gpg.ssh.allowedSignersFile, which is only a fallback."
+    },
     "authors": {
       "type": "object",
       "additionalProperties": false,
@@ -23,14 +32,14 @@
         "default_allowlist": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 }
+          "items": { "type": "string", "minLength": 1, "pattern": "^\\S+$" }
         },
         "env_overrides": {
           "type": "object",
           "default": {},
           "additionalProperties": {
             "type": "array",
-            "items": { "type": "string", "minLength": 1 }
+            "items": { "type": "string", "minLength": 1, "pattern": "^\\S+$" }
           }
         }
       }
@@ -43,9 +52,10 @@
         "additionalProperties": false,
         "properties": {
           "require_signed": { "type": "boolean" },
-          "require_ticket": { "type": "boolean" },
-          "require_service": { "type": "boolean" },
+          "require_ticket": { "type": "boolean", "description": "Roadmap: validated but not yet enforced (see #79)." },
+          "require_service": { "type": "boolean", "description": "Roadmap: validated but not yet enforced (see #79)." },
           "require_where": {
+            "description": "Roadmap: validated but not yet enforced (see #79).",
             "type": "array",
             "items": {
               "type": "string",
@@ -56,17 +66,19 @@
         }
       }
     },
-    "ff_only": { "type": "boolean" },
+    "ff_only": { "type": "boolean", "description": "Roadmap: validated but not yet enforced (see #79). Fast-forward-only updates are always enforced by the pre-receive hook regardless of this field." },
     "notes_ref": {
       "type": "string",
       "pattern": "^refs/(?!.*(?:^|/)\\.)(?!.*\\.\\.)(?!.*\\.lock$)(?!.*//@)(?!.*@\\{)(?!.*[~^:?*\\[\\]\\\\])\\S+(?:/\\S+)*$"
     },
     "journals_ref_prefix": {
       "type": "string",
+      "description": "Reserved; not yet honored. Journal refs derive from SHIPLOG_REF_ROOT / git config shiplog.refRoot. Accepted for forward compatibility only.",
       "pattern": "^refs/(?!.*(?:^|/)\\.)(?!.*\\.\\.)(?!.*\\.lock$)(?!.*//@)(?!.*@\\{)(?!.*[~^:?*\\[\\]\\\\])\\S+/(?:\\S+/)*$"
     },
     "anchors_ref_prefix": {
       "type": "string",
+      "description": "Reserved; not yet honored. Anchor refs derive from SHIPLOG_REF_ROOT / git config shiplog.refRoot. Accepted for forward compatibility only.",
       "pattern": "^refs/(?!.*(?:^|/)\\.)(?!.*\\.\\.)(?!.*\\.lock$)(?!.*//@)(?!.*@\\{)(?!.*[~^:?*\\[\\]\\\\])\\S+/(?:\\S+/)*$"
     }
   }

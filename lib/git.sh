@@ -177,7 +177,7 @@ EOF
 
 sign_commit() {
   local tree="$1"; shift
-  resolve_policy
+  shiplog_policy_assert_loaded
   local sign_mode="${SHIPLOG_SIGN_EFFECTIVE:-0}"
   GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-${SHIPLOG_AUTHOR_NAME:-$(git config user.name || echo 'Shiplog Bot')}}"
   GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-${SHIPLOG_AUTHOR_EMAIL:-$(git config user.email || echo 'shiplog-bot@local')}}"
@@ -209,7 +209,7 @@ attach_note_if_present() {
 
 ensure_signed_on_verify() {
   local commit="$1"
-  resolve_policy
+  shiplog_policy_assert_loaded
 
   case "${SHIPLOG_SIGN_EFFECTIVE:-0}" in
     0|false|no|off) return 0 ;;
@@ -230,7 +230,7 @@ ensure_signed_on_verify() {
 }
 
 author_allowed() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   local author="$1"
   local allow="$ALLOWED_AUTHORS_EFFECTIVE"
   [ -z "$allow" ] && return 0
@@ -241,7 +241,7 @@ author_allowed() {
 }
 
 require_allowed_author() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   local allow="$ALLOWED_AUTHORS_EFFECTIVE"
   [ -z "$allow" ] && return 0
 
@@ -266,7 +266,7 @@ require_allowed_author() {
 }
 
 require_allowed_signer() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   case "${SHIPLOG_SIGN_EFFECTIVE:-0}" in
     0|false|no|off) return 0 ;;
   esac
