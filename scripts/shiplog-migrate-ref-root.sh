@@ -158,6 +158,11 @@ if [ "$REMOVE_OLD" -eq 1 ]; then
   for a in "${actions[@]}"; do
     rest=${a#* }; src=${rest#* }
     git update-ref -d "$src"
+    # Shiplog points refs/notes/<notes ref> at the real notes ref so `git notes
+    # --ref=` reaches it; drop that alias with the ref instead of leaving it dangling.
+    if [ "$(git symbolic-ref -q "refs/notes/$src" 2>/dev/null || true)" = "$src" ]; then
+      git symbolic-ref --delete "refs/notes/$src"
+    fi
   done
 fi
 

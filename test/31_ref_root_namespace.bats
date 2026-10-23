@@ -584,3 +584,28 @@ JSON
   run "$sign" --message-only
   [ "$status" -eq 0 ]
 }
+
+@test "refs migrate --remove-old drops the local refs/notes alias of the removed notes ref" {
+  shiplog_bootstrap_trust
+  shiplog_write_local_policy
+  export SHIPLOG_LOG="$LOG_FILE"
+  run write_entry
+  unset SHIPLOG_LOG
+  [ "$status" -eq 0 ]
+  # Control: writing a note created the alias for the default-root notes ref.
+  [ "$(git symbolic-ref -q "refs/notes/$DEFAULT_ROOT/notes/logs")" = "$DEFAULT_ROOT/notes/logs" ]
+
+  run git shiplog refs migrate --to "$BRANCH_ROOT" --remove-old
+  echo "migrate: $output" >&2
+  [ "$status" -eq 0 ]
+  run git rev-parse -q --verify "$DEFAULT_ROOT/notes/logs"
+  [ "$status" -ne 0 ]
+  run git symbolic-ref -q "refs/notes/$DEFAULT_ROOT/notes/logs"
+  [ "$status" -ne 0 ]
+  run git for-each-ref refs/notes
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"broken ref"* ]]
+  run git shiplog --boring show
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hello-from-refroot"* ]]
+}
