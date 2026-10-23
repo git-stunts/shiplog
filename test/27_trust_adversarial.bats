@@ -167,6 +167,34 @@ bootstrap_server_k() {
   [ "$(adv_remote_ref "$REMOTE_DIR" "$ADV_TRUST_REF")" = "$GENESIS_AB" ]
 }
 
+@test "trust-replay: re-pushing an earlier roster with its original attestations is rejected" {
+  adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
+  # S0: roster A, B, C (threshold 2), attested by A and B.
+  trust_abc=$(adv_trust_json 2 attestation a@example.com b@example.com c@example.com)
+  signers_abc="$(adv_signers a@example.com=A b@example.com=B c@example.com=C)"
+  s0=$(adv_trust_commit -S A --sig a@example.com=A --sig b@example.com=B \
+    -m "shiplog: trust root (A+B+C)" "$trust_abc" "$signers_abc")
+  git update-ref "$ADV_TRUST_REF" "$s0"
+  adv_push_ok "$ADV_TRUST_REF"
+
+  # S1: A and B remove C (say C's key leaked).
+  trust_ab=$(adv_trust_json 2 attestation a@example.com b@example.com)
+  signers_ab="$(adv_signers a@example.com=A b@example.com=B)"
+  s1=$(adv_trust_commit -p "$s0" -S A --sig a@example.com=A --sig b@example.com=B \
+    -m "shiplog: remove C" "$trust_ab" "$signers_ab")
+  git update-ref "$ADV_TRUST_REF" "$s1" "$s0"
+  adv_push_ok "$ADV_TRUST_REF"
+
+  # Replay by A alone: a child of S1, signed by A, that copies S0's tree with its
+  # .sig files. B never approved going from S1 back to S0, so 2-of-2 is not met.
+  replay=$(adv_commit_tree "$(git rev-parse "$s0^{tree}")" "$s1" A "shiplog: restore C" a@example.com)
+  adv_assert_commit_signed "$replay"
+  git update-ref "$ADV_TRUST_REF" "$replay" "$s1"
+
+  adv_push_rejected "$ADV_TRUST_REF"
+  [ "$(adv_remote_ref "$REMOTE_DIR" "$ADV_TRUST_REF")" = "$s1" ]
+}
+
 @test "legit-rotation: A+B quorum adding maintainer C is accepted" {
   adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
   build_genesis_ab

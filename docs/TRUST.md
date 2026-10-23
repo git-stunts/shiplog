@@ -106,20 +106,30 @@ git push origin refs/_shiplog/trust/root
 The canonical payload is built by `trust_verify_payload` in `lib/trust-verify.sh` and nowhere else:
 
 ```
-shiplog-trust-tree-v1
+shiplog-trust-tree-v2
 <base_tree_oid>
 <trust_id>
 <threshold>
+<prior_oid>
 ```
 
 `<base_tree_oid>` is the tree holding only `trust.json` and `allowed_signers` of the commit being
 pushed (never the `trust_sigs` directory), `<trust_id>` is `trust.json.id` and `<threshold>` is
-`trust.json.threshold` of that same commit. Signatures use the `shiplog-trust` namespace.
+`trust.json.threshold` of that same commit. `<prior_oid>` is the trust commit this update replaces
+(the server's current tip; 40 zeros at genesis). Signatures use the `shiplog-trust` namespace.
+
+An attestation therefore approves one transition, not a document: it cannot be copied onto another
+history to restore an earlier roster (for example, to bring back a removed maintainer). `v1`
+payloads, which lacked `<prior_oid>`, are not accepted.
 
 ```bash
 scripts/shiplog-trust-sign.sh --message-only <commit>                 # print the exact payload
 scripts/shiplog-trust-sign.sh --principal you@example.com <commit>    # write .shiplog/trust_sigs/you@example.com.sig
+scripts/shiplog-trust-sign.sh --parent <current-tip> <commit>         # explicit prior (default: local trust ref tip)
 ```
+
+Fetch the trust ref before attesting a rotation: the default `<prior_oid>` is your local
+`refs/_shiplog/trust/root`, and an attestation made against a stale tip is rejected.
 
 Verification of each `.sig`:
 

@@ -561,7 +561,7 @@ if [ "$sig_mode" = "attestation" ]; then
   fi
   if [ -n "$attest_principal" ]; then
     attest_tmp=$(mktemp -d)
-    trust_verify_payload_from_parts "$BASE_TREE" "$trust_id" "$threshold" > "$attest_tmp/payload"
+    trust_verify_payload_from_parts "$BASE_TREE" "$trust_id" "$threshold" "$TV_ZERO_OID" > "$attest_tmp/payload"
     if ssh-keygen -Y sign -f "$attest_key" -n "${SHIPLOG_TRUST_NAMESPACE:-shiplog-trust}" - < "$attest_tmp/payload" > "$attest_tmp/sig" 2>/dev/null; then
       mkdir -p "$REPO_ROOT/.shiplog/trust_sigs"
       cp "$attest_tmp/sig" "$REPO_ROOT/.shiplog/trust_sigs/$attest_principal.sig"
