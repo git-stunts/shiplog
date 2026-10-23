@@ -66,7 +66,7 @@ Example:
 git shiplog setup \
   --strictness strict \
   --trust-id shiplog-trust-root \
-  --trust-threshold 2 \
+  --trust-threshold 1 \
   --trust-maintainer "name=Alice,email=alice@example.com,key=~/.ssh/alice.pub,principal=alice@example.com" \
   --trust-maintainer "name=Bob,email=bob@example.com,key=~/.ssh/bob.pub,principal=bob@example.com" \
   --auto-push
@@ -75,7 +75,7 @@ git shiplog setup \
 Flags (repeat `--trust-maintainer` as needed):
 
 - `--trust-id ID`
-- `--trust-threshold N` (≤ number of maintainers)
+- `--trust-threshold N` (≤ number of maintainers). The default `chain` mode accepts only `1`; the pre-receive hook rejects a chain-mode trust ref with a higher threshold. For N-of-M approval use `--trust-sig-mode attestation` and collect each maintainer's attestation before pushing (see [docs/TRUST.md](../TRUST.md)).
 - `--trust-message "Commit message"` (optional)
 - `--trust-maintainer "name=<n>,email=<e>,key=<ssh_pub_path>[,principal=<p>][,role=<r>][,revoked=<yes|no>][,pgp=<fpr>]"`
 
@@ -89,8 +89,8 @@ Notes:
 
 ## Auto‑Push
 
-- `--auto-push` (or `SHIPLOG_SETUP_AUTO_PUSH=1`) pushes the policy ref to origin after syncing; `--no-auto-push` disables.
-- In Strict mode, if trust was bootstrapped non‑interactively and origin is configured, the wizard also pushes the trust ref.
+- `--auto-push` (or `SHIPLOG_SETUP_AUTO_PUSH=1`) pushes the policy ref to the Shiplog remote after syncing (`SHIPLOG_REMOTE` or `git config shiplog.remote`, default `origin`; pushes use `--no-verify`); `--no-auto-push` disables.
+- If a trust ref exists locally and the Shiplog remote is configured, the wizard also pushes the trust ref.
 
 ## Server Guidance
 
