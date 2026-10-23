@@ -17,7 +17,9 @@ UPSTREAM_URL="https://github.com/flyingrobots/shiplog.git"
 setup_file() {
   local src="$BATS_FILE_TMPDIR/src"
   mkdir -p "$src"
-  cp -a "$SHIPLOG_PROJECT_ROOT/." "$src/"
+  # cp -R, not cp -a: the copy must belong to the test user. On CI the checkout is
+  # owned by the runner uid, and git refuses a repository with "dubious ownership".
+  cp -R "$SHIPLOG_PROJECT_ROOT/." "$src/"
   rm -rf "$src/.git"
   git -C "$src" init -q
   git -C "$src" add -A
