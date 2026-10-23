@@ -371,11 +371,14 @@ load_policy_state() {
 
 get_policy_require_signed() {
   local env="$1"
-  # Explicit has() check: a per-environment `false` must override a global `true`
-  # (jq's // operator would treat false as absent).
+  # Same lookup order as the CLI (lib/policy.sh): deployment_requirements[ENV] →
+  # deployment_requirements.default → top level. Explicit has() checks so an
+  # explicit `false` overrides an inherited `true` (jq's // would drop it).
   "$JQ_BIN" -r --arg env "$env" '
     if (.deployment_requirements[$env] | type == "object" and has("require_signed"))
     then .deployment_requirements[$env].require_signed
+    elif (.deployment_requirements.default | type == "object" and has("require_signed"))
+    then .deployment_requirements.default.require_signed
     else (.require_signed // false)
     end | tostring' <<<"$CURRENT_POLICY_JSON"
 }

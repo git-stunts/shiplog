@@ -58,7 +58,7 @@ Each key under `deployment_requirements` corresponds to an environment name (e.g
 | `require_service` | boolean | Require the service field to be present. *Roadmap: not yet enforced (see #79).* |
 | `require_where` | array | Require specific `where` attributes (allowed values: `region`, `cluster`, `namespace`, `service`, `environment`). *Roadmap: not yet enforced (see #79).* |
 
-Lookup order for each per-environment field: `deployment_requirements.<env>.<field>` when present (an explicit `false` counts), then `deployment_requirements.default.<field>`, then the top-level field, then the built-in default. The CLI resolves the environment named on the command (`write prod`, `verify staging`, `--env`), not the default environment. The pre-receive hook does not yet apply the `deployment_requirements.default` step for `require_signed` (it reads the environment entry, then the top-level field; #127), so keep the top-level `require_signed` at least as strict as `default` until the hook catches up.
+Lookup order for each per-environment field: `deployment_requirements.<env>.<field>` when present (an explicit `false` counts), then `deployment_requirements.default.<field>`, then the top-level field, then the built-in default. The CLI resolves the environment named on the command (`write prod`, `verify staging`, `--env`), not the default environment. The pre-receive hook resolves `require_signed` in the same order (#127).
 
 ## Validation Tips
 
