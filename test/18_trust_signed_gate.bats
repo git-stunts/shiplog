@@ -26,7 +26,7 @@ install_hook_with_gate() {
     'export SHIPLOG_REQUIRE_SIGNED_TRUST=1' \
     'export SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=either' \
     'export SHIPLOG_DEBUG_SSH_VERIFY=1' \
-    'exec /bin/bash "$0.real" "$@"' > "$REMOTE_DIR/hooks/pre-receive"
+    'exec /usr/bin/env bash "$0.real" "$@"' > "$REMOTE_DIR/hooks/pre-receive"
   chmod +x "$REMOTE_DIR/hooks/pre-receive" "$REMOTE_DIR/hooks/pre-receive.real"
 }
 

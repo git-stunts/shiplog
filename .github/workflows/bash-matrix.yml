@@ -11,6 +11,8 @@ permissions:
 jobs:
   bash-matrix:
     runs-on: ubuntu-latest
+    # The suite runs with no Bats timeout (#132); this is the only guard.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

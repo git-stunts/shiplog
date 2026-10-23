@@ -12,6 +12,12 @@ setup() {
 
 teardown() {
   shiplog_cleanup_sandbox_repo
+  # Bare origins created by individual tests (no EXIT traps: bats-core owns
+  # the EXIT trap and overriding it hides failure output, #148).
+  if [ -n "${ORIGIN2_DIR:-}" ] && [ -d "$ORIGIN2_DIR" ]; then
+    rm -rf "$ORIGIN2_DIR"
+  fi
+  unset ORIGIN2_DIR
 }
 
 @test "setup open writes policy and updates ref" {
@@ -96,7 +102,6 @@ teardown() {
 @test "setup strict env-driven auto-pushes trust to origin" {
   # Prepare origin
   ORIGIN2_DIR=$(mktemp -d)
-  trap "rm -rf '$ORIGIN2_DIR'" EXIT
   git remote remove origin >/dev/null 2>&1 || true
   git init --bare "$ORIGIN2_DIR"
   git remote add origin "$ORIGIN2_DIR"
