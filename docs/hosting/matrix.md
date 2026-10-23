@@ -52,17 +52,18 @@ This page summarizes what you can (and cannot) enforce on common Git hosts for S
 ## What to Enforce
 
 Whether in hooks or CI checks, enforce:
+
 - Fast-forward only (Shiplog journals and trust/policy updates)
-- Trust:
-  - sig_mode=chain: at least `threshold` distinct maintainer-signed commits over the same trust tree
-  - sig_mode=attestation: at least `threshold` valid signatures over canonical payload (tree OID + context)
+- Trust (see [docs/TRUST.md](../TRUST.md)):
+  - sig_mode=chain: threshold 1 only; the trust commit carries a valid signature from an unrevoked maintainer of the prior roster
+  - sig_mode=attestation: at least `threshold` valid signatures from distinct, unrevoked maintainers over the canonical `shiplog-trust-tree-v2` payload (base tree OID, trust id, threshold, prior trust commit)
 - Journals:
-  - Trailer present and parseable; monotonic seq; correct env and parent
-  - Policy: signatures/allowlist/ticket/required fields per policy
+  - Trailer present and parseable; seq starts at 0 and increments by one; declared env and parent match the ref; `trust_oid` matches the current trust tip
+  - Policy: required signatures and author allowlists per policy (`require_ticket`, `require_service` and `require_where` are validated but not yet enforced, see #79)
 
 ## Reference
 
 - Hook: [`contrib/hooks/pre-receive.shiplog`](../../contrib/hooks/pre-receive.shiplog)
 - Verifier: [`scripts/shiplog-verify-trust.sh`](../../scripts/shiplog-verify-trust.sh)
 - GitHub workflow: [`docs/examples/github/workflow-shiplog-trust-verify.yml`](../examples/github/workflow-shiplog-trust-verify.yml)
-- Setup: [`git shiplog setup --trust-sig-mode {chain|attestation}`](../cli/setup.md)
+- Setup: [`git shiplog setup --trust-sig-mode {chain|attestation}`](../features/setup.md)

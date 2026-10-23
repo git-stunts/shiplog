@@ -319,3 +319,31 @@ jobs:
             exit 1
           fi
           echo "No runner hard-codes a timeout default."
+
+  markdown_structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Code fences are balanced in every tracked Markdown file
+        run: scripts/dev/check-md-fences.sh
+      - name: Relative links resolve in every tracked Markdown file
+        run: scripts/dev/check-md-links.sh
+      - name: AGENTS.md holds instructions only
+        run: |
+          set -euo pipefail
+          logs=$(grep -cE '^\{"date"' AGENTS.md || true)
+          escapes=$(grep -c '\\n##' AGENTS.md || true)
+          size=$(wc -c < AGENTS.md | tr -d ' ')
+          echo "AGENTS.md: ${size} bytes, ${logs} session-log line(s), ${escapes} literal \\n heading(s)"
+          if [ "$logs" -ne 0 ]; then
+            echo "AGENTS.md contains raw session logs; move them to docs/notes/session-logs/" >&2
+            exit 1
+          fi
+          if [ "$escapes" -ne 0 ]; then
+            echo "AGENTS.md contains a literal \\n before a heading" >&2
+            exit 1
+          fi
+          if [ "$size" -ge 8192 ]; then
+            echo "AGENTS.md is ${size} bytes; keep it under 8192" >&2
+            exit 1
+          fi
