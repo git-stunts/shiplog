@@ -386,3 +386,22 @@ line_count() {
   run git shiplog validate-trailer "$sha"
   [ "$status" -eq 0 ]
 }
+
+@test "g7b ls: LIMIT must be a positive integer and extra arguments die" {
+  git shiplog write >/dev/null
+  run git shiplog ls prod abc
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LIMIT must be a positive integer"* ]]
+  run git shiplog ls prod 0
+  [ "$status" -ne 0 ]
+  run git shiplog ls prod 5 extra
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unexpected argument to ls: extra"* ]]
+  run git shiplog ls prod --bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown ls option: --bogus"* ]]
+  # Positive control
+  run git shiplog ls prod 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cli"* ]]
+}

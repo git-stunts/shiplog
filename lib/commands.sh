@@ -1091,6 +1091,12 @@ cmd_ls() {
   done
   local env="${pos[0]:-$DEFAULT_ENV}"
   local limit="${pos[1]:-20}"
+  [ "${#pos[@]}" -le 2 ] || die "shiplog: unexpected argument to ls: ${pos[2]} (usage: git shiplog ls [ENV] [LIMIT])"
+  # A bad LIMIT used to fail inside rev-list's process substitution and print an
+  # empty table with exit 0.
+  case "$limit" in
+    ''|*[!0-9]*|0*) die "shiplog: ls LIMIT must be a positive integer, got '$limit'" ;;
+  esac
   shiplog_validate_env_name "$env"
   local ref; ref="$(ref_journal "$env")"
   [ -n "$(current_tip "$ref")" ] || die "No entries at $ref"
