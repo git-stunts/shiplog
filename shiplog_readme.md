@@ -50,6 +50,8 @@ Shiplog leans on the standard Git toolchain. Verify these are available first:
 
 `scripts/install-shiplog.sh` clones Shiplog under `$SHIPLOG_HOME` and invokes `install-shiplog-deps.sh`, which provisions jq. Match or exceed these versions on CI runners (see Dockerfile matrix) to avoid surprises.
 
+Both `scripts/install-shiplog.sh` and `scripts/uninstall-shiplog.sh` refuse to reset or remove a directory unless it is strictly inside an allowed base (`SHIPLOG_ALLOWED_BASES`, default `$HOME:/opt/shiplog`), is not a symlink, and is a Shiplog checkout (`bin/git-shiplog` present and `remote.origin.url` matching `SHIPLOG_REPO_URL`). `--dry-run` runs the same checks and exits non-zero on refusal. The uninstaller's `--force-unsafe` skips only the checkout check.
+
 Prefer a plan first? Use the config wizard:
 
 ```bash
