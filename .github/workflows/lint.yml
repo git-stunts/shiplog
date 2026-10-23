@@ -291,6 +291,18 @@ jobs:
             fi
           done
           echo "make test forwards TEST_TIMEOUT_SECS, SHIPLOG_USE_LOCAL_SANDBOX and BATS_FLAGS."
+      - name: No signing build leg left in the workflows
+        run: |
+          set -euo pipefail
+          # #135 removed the ENABLE_SIGNING build arg and the signing matrix;
+          # a workflow that still passes it, or keys a cache on the old
+          # matrix value, is building something that no longer exists.
+          # (lint.yml itself is excluded: it holds this pattern.)
+          if grep -nE 'ENABLE_SIGNING|buildx-(false|true)-' --exclude=lint.yml .github/workflows/*.yml; then
+            echo "::error::workflow still references the removed signing build leg"
+            exit 1
+          fi
+          echo "No workflow references the removed signing build leg."
       - name: One timeout default (none) across the runners
         run: |
           set -euo pipefail
