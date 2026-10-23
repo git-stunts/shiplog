@@ -217,27 +217,70 @@ cmd_version() {
   printf 'shiplog %s\n' "$(shiplog_version)"
 }
 
+# shiplog_config_unset_value KEY VALUE — remove every KEY entry equal to VALUE
+# (literal match; works on Git versions without --fixed-value).
+shiplog_config_unset_value() {
+  local key="$1" value="$2" kept line
+  git config --get-all "$key" 2>/dev/null | grep -Fxq -- "$value" || return 0
+  kept=$(git config --get-all "$key" 2>/dev/null | grep -Fxv -- "$value" || true)
+  git config --unset-all "$key" 2>/dev/null || true
+  while IFS= read -r line; do
+    [ -n "$line" ] && git config --add "$key" "$line"
+  done <<<"$kept"
+  return 0
+}
+
 cmd_init() {
   ensure_in_repo
-  case "${1:-}" in
-    --help|-h)
-      printf 'Usage: git shiplog init\n\nConfigure fetch/push refspecs for the Shiplog ref root and enable reflogs.\n'
-      return 0 ;;
-  esac
+  local want_push=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --help|-h)
+        printf 'Usage: git shiplog init [--push-refspecs]\n\nConfigure a fetch refspec for the Shiplog ref root and enable reflogs.\nShiplog pushes its refs itself (auto-push, git shiplog publish); --push-refspecs\nalso makes a plain `git push` send them (not recommended, see docs/features/init.md).\n'
+        return 0 ;;
+      --push-refspecs) want_push=1 ;;
+      *) die "shiplog: unknown init option: $1" ;;
+    esac
+    shift
+  done
   local remote
   remote=$(shiplog_remote_name)
-  local fetch_value="+$REF_ROOT/*:$REF_ROOT/*"
-  if ! git config --get-all remote."$remote".fetch 2>/dev/null | grep -Fxq "$fetch_value"; then
-    git config --add remote."$remote".fetch "$fetch_value"
+  local spec="$REF_ROOT/*:$REF_ROOT/*"
+
+  # Fetch: non-forced, so a rewritten remote ledger makes `git fetch` fail instead of
+  # silently replacing the local copy (the evidence). Older versions used "+spec".
+  shiplog_config_unset_value remote."$remote".fetch "+$spec"
+  if ! git config --get-all remote."$remote".fetch 2>/dev/null | grep -Fxq -- "$spec"; then
+    git config --add remote."$remote".fetch "$spec"
   fi
 
-  local existing_push
+  # Push: none by default (#140). Any remote.<r>.push entry replaces push.default
+  # for a plain `git push` and routes the ledger through pre-push hooks.
+  local existing_push others had_spec=0
   existing_push=$(git config --get-all remote."$remote".push 2>/dev/null || true)
-  if ! printf '%s\n' "$existing_push" | grep -Fxq "$REF_ROOT/*:$REF_ROOT/*"; then
-    git config --add remote."$remote".push "$REF_ROOT/*:$REF_ROOT/*"
-  fi
-  if [ -z "$existing_push" ] && ! git config --get-all remote."$remote".push 2>/dev/null | grep -Fxq "HEAD"; then
-    git config --add remote."$remote".push HEAD
+  if printf '%s\n' "$existing_push" | grep -Fxq -- "$spec"; then had_spec=1; fi
+  if [ "$want_push" -eq 1 ] || { [ "$had_spec" -eq 1 ] && [ "$(git config --get shiplog.pushRefspecs 2>/dev/null)" = "true" ]; }; then
+    if [ "$had_spec" -eq 0 ]; then
+      git config --add remote."$remote".push "$spec"
+    fi
+    if [ -z "$existing_push" ]; then
+      git config --add remote."$remote".push HEAD
+    fi
+    git config shiplog.pushRefspecs true
+    if [ "$want_push" -eq 1 ]; then
+      printf '⚠️ shiplog: remote.%s.push now lists %s: a plain git push sends the ledger with your code, ignores push.default and runs pre-push hooks on it. Shiplog does not need this; to undo: git config --unset shiplog.pushRefspecs && git shiplog init\n' "$remote" "$spec"
+    fi
+  elif [ "$had_spec" -eq 1 ]; then
+    # Written by an older Shiplog. HEAD goes too only when it was the companion
+    # entry Shiplog added to an otherwise empty push config.
+    others=$(printf '%s\n' "$existing_push" | grep -Fxv -e "$spec" -e HEAD | sed '/^$/d' || true)
+    shiplog_config_unset_value remote."$remote".push "$spec"
+    if [ -z "$others" ] && printf '%s\n' "$existing_push" | grep -Fxq HEAD; then
+      shiplog_config_unset_value remote."$remote".push HEAD
+      printf 'ℹ️ shiplog: Removed push refspecs %s and HEAD from remote.%s (a plain git push behaves normally again; Shiplog publishes its own refs).\n' "$spec" "$remote"
+    else
+      printf 'ℹ️ shiplog: Removed push refspec %s from remote.%s (Shiplog publishes its own refs).\n' "$spec" "$remote"
+    fi
   fi
 
   if [ "$(git config --get core.logAllRefUpdates 2>/dev/null)" != "true" ]; then
@@ -246,9 +289,9 @@ cmd_init() {
   if shiplog_can_use_bosun; then
     local bosun
     bosun=$(shiplog_bosun_bin)
-    "$bosun" style --title "Init" -- "Configured refspecs for $REF_ROOT/* and enabled reflogs."
+    "$bosun" style --title "Init" -- "Configured the fetch refspec for $REF_ROOT/* and enabled reflogs."
   else
-    printf 'Configured refspecs for %s/* and enabled reflogs.\n' "$REF_ROOT"
+    printf 'Configured the fetch refspec for %s/* and enabled reflogs.\n' "$REF_ROOT"
   fi
 }
 

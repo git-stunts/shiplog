@@ -216,8 +216,10 @@ esac
 
 for root in "${SHIPLOG_ROOTS[@]}"; do
   git_config_remove_refspec "remote.${REMOTE_NAME}.fetch" "+$root/*:$root/*"
+  git_config_remove_refspec "remote.${REMOTE_NAME}.fetch" "$root/*:$root/*"
   git_config_remove_refspec "remote.${REMOTE_NAME}.push" "$root/*:$root/*"
 done
+git config --unset shiplog.pushRefspecs >/dev/null 2>&1 || true
 
 unpublished_refs=()
 unknown_refs=()
