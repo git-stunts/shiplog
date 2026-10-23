@@ -68,6 +68,10 @@ git shiplog --version
 cd your-repo
 git shiplog init
 
+# Once per repo: name the maintainers and their SSH keys (the trust roster).
+# Every entry records which roster it was written under, so writes need one.
+"$SHIPLOG_HOME/scripts/shiplog-bootstrap-trust.sh"   # interactive; flags in docs/TRUST.md
+
 export SHIPLOG_ENV=prod SHIPLOG_SERVICE=web
 
 # Wrap the real command. stdout, stderr, exit code, timing: all captured.
@@ -76,8 +80,9 @@ git shiplog run --reason "canary 5%" -- kubectl rollout status deploy/web
 # Or write an entry by hand (prompts for anything you didn't pass).
 git shiplog write --status success --reason "manual hotfix, ticket OPS-421"
 
-# Push the ledger when you're ready (journals + notes; policy/trust with flags).
-git shiplog publish --env prod
+# With a remote, entries push as they are written. To hold them until the
+# deploy is done: git config shiplog.autoPush false (or --no-push), then
+git shiplog publish --env prod      # journal + notes; --policy / --trust for those refs
 ```
 
 ### Read it back
