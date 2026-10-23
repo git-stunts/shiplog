@@ -442,3 +442,20 @@ make_restricted_path() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"+ rm -rf "*"outer"* ]]
 }
+
+@test "installer update path ignores an exported GIT_DIR/GIT_WORK_TREE" {
+  SHIPLOG_HOME="$HOME/.shiplog" run bash "$INSTALLER" --no-profile --silent
+  [ "$status" -eq 0 ]
+
+  local victim="$HOME/victim"
+  git clone -q "$SHIPLOG_SMOKE_ORIGIN" "$victim"
+  echo "precious uncommitted line" >> "$victim/README.md"
+
+  SHIPLOG_HOME="$HOME/.shiplog" GIT_DIR="$victim/.git" GIT_WORK_TREE="$victim" \
+    run bash "$INSTALLER" --no-profile --silent
+  [ "$status" -eq 0 ]
+  grep -q "precious uncommitted line" "$victim/README.md"
+  # Positive control: the update really ran against the install dir.
+  [ -x "$HOME/.shiplog/bin/git-shiplog" ]
+  [ "$(git -C "$HOME/.shiplog" rev-parse HEAD)" = "$(git -C "$HOME/.shiplog" rev-parse '@{upstream}')" ]
+}

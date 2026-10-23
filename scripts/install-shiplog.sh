@@ -9,6 +9,12 @@ DRY_RUN=0
 SILENT=0
 SKIP_PROFILE=0
 
+# Every git call below targets INSTALL_DIR explicitly. Drop inherited
+# repository-locating variables (e.g. when run from a Git hook) so that
+# `git -C "$INSTALL_DIR" reset --hard` can never act on some other repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+
 # Shared path guard (also used by scripts/uninstall-shiplog.sh). The installer
 # runs from a checkout, so the guard lives next to it; fail closed if missing.
 INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
