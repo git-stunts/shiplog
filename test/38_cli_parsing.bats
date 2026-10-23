@@ -232,8 +232,12 @@ line_count() {
   fake_home=$(mktemp -d)
   mkdir -p "$fake_home/docs/examples/github"
   printf 'steps:\n\t- name: test step\n' > "$fake_home/docs/examples/github/workflow-shiplog-verify.yml"
-  # Bosun rendering is the path that expands tabs, so this run is not boring.
-  run env SHIPLOG_BORING=0 SHIPLOG_HOME="$fake_home" SHIPLOG_LIB_DIR="${SHIPLOG_LIB_DIR:-$SHIPLOG_PROJECT_ROOT/lib}" \
+  # Bosun rendering is the path that expands tabs, so this run is not boring and
+  # names the repo's bosun explicitly: the CI matrix images have no bosun on PATH,
+  # which would silently take the plain `cat` path instead.
+  local bosun_bin="$SHIPLOG_PROJECT_ROOT/scripts/bosun"
+  [ -x "$bosun_bin" ]
+  run env SHIPLOG_BORING=0 SHIPLOG_BOSUN_BIN="$bosun_bin" SHIPLOG_HOME="$fake_home" SHIPLOG_LIB_DIR="${SHIPLOG_LIB_DIR:-$SHIPLOG_PROJECT_ROOT/lib}" \
     git shiplog config --emit-github-workflow
   rm -rf "$fake_home"
   [ "$status" -eq 0 ]
