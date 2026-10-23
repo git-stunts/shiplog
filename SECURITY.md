@@ -6,9 +6,10 @@
 
 Hardening notes:
 
-- `git shiplog run` stores the wrapped command's output as a git note and its
-  argv in the entry trailer, and pushes both unredacted (#86). Never run
-  commands that print secrets, or pass secrets as arguments, through `run`.
+- A standard `git shiplog run` stores the wrapped command's output as a git
+  note and its argv in the entry trailer, and publishes both unredacted with
+  the journal (#86). Never run commands that print secrets, or pass secrets as
+  arguments, through `run`. `run --dry-run` executes and stores nothing.
 - Server-side hooks are only enforceable on self-hosted Git. For GitHub/GitLab
   SaaS, use branch namespace + protected rulesets and required checks. See
   docs/hosting/matrix.md and docs/hosting/github.md.
