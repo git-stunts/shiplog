@@ -11,7 +11,14 @@ set -euo pipefail
 # requires a maintainer signature on policy updates once a trust ref exists.
 
 POLICY_FILE=${1:-.shiplog/policy.json}
-POLICY_REF=${SHIPLOG_POLICY_REF:-refs/_shiplog/policy/current}
+# Policy ref follows the configured ref root (SHIPLOG_POLICY_REF > SHIPLOG_REF_ROOT >
+# git config shiplog.refRoot > refs/_shiplog). The CLI exports the resolved values.
+POLICY_REF=${SHIPLOG_POLICY_REF:-}
+if [ -z "$POLICY_REF" ]; then
+  POLICY_REF_ROOT="${SHIPLOG_REF_ROOT:-$(git config --get shiplog.refRoot 2>/dev/null || true)}"
+  POLICY_REF_ROOT="${POLICY_REF_ROOT:-refs/_shiplog}"
+  POLICY_REF="${POLICY_REF_ROOT%/}/policy/current"
+fi
 MESSAGE=${SHIPLOG_POLICY_MESSAGE:-"shiplog: update policy"}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

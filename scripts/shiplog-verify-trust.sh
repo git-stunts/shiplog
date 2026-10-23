@@ -24,7 +24,7 @@ set -euo pipefail
 err() { echo "❌ shiplog: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || err "missing dependency: $1"; }
 
-OLD=""; NEW=""; REF="${SHIPLOG_TRUST_REF:-refs/_shiplog/trust/root}"
+OLD=""; NEW=""; REF="${SHIPLOG_TRUST_REF:-${SHIPLOG_REF_ROOT:-refs/_shiplog}/trust/root}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --old) shift; OLD="${1:-}" ;;

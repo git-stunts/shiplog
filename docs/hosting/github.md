@@ -8,8 +8,13 @@ See also: Git Hosting Enforcement Matrix (docs/hosting/matrix.md) for a side‑b
 
 - Shiplog writes commits under custom refs, not branches or tags:
   - Journals: `refs/_shiplog/journal/<env>` (e.g., `prod`)
+  - Anchors:  `refs/_shiplog/anchors/<env>`
   - Policy:   `refs/_shiplog/policy/current`
   - Trust:    `refs/_shiplog/trust/root`
+  - Notes:    `refs/_shiplog/notes/logs` (attached logs)
+- All of them hang off one ref root (`refs/_shiplog` by default). `SHIPLOG_REF_ROOT` or
+  `git config shiplog.refRoot` moves every one of them together; `git shiplog refs root show`
+  prints the effective root, where it came from (env, config or default) and each derived ref.
 
 GitHub’s web UI only shows branches (`refs/heads/*`) and tags (`refs/tags/*`), so these custom refs won’t appear in the Branches/Tags pages. They do exist on the remote; you can list them with CLI commands.
 
@@ -49,18 +54,19 @@ If your plan cannot protect arbitrary refs, move Shiplog refs under branches so 
 
 - New layout (examples):
   - `refs/heads/_shiplog/journal/<env>`
+  - `refs/heads/_shiplog/anchors/<env>`
   - `refs/heads/_shiplog/policy/current`
   - `refs/heads/_shiplog/trust/root`
+  - `refs/heads/_shiplog/notes/logs`
 - Then create a Branch ruleset targeting `_shiplog/**` with the same rules: block deletion, non-FF, require linear history.
 
 Migration sketch:
-1) Push current tips to the new namespace:
-   - `git for-each-ref 'refs/_shiplog/*' --format='%(refname) %(objectname)' | while read -r ref oid; do new="refs/heads/${ref#refs/}"; git update-ref "$new" "$oid"; done`
-   - `git push origin 'refs/heads/_shiplog/*:refs/heads/_shiplog/*'`
-2) Point Shiplog at the new root (per repo):
-   - `git config shiplog.refRoot 'refs/heads/_shiplog'`
-   - or env: `SHIPLOG_REF_ROOT='refs/heads/_shiplog'`
-3) Update CI/automation to use the new ref names.
+1) Mirror current tips to the new namespace and push them (the helper handles every ref kind, nested names included, and records the new root in `git config shiplog.refRoot`):
+   - `git shiplog refs migrate --to refs/heads/_shiplog --dry-run` (preview)
+   - `git shiplog refs migrate --to refs/heads/_shiplog --push`
+   - Avoid hand-rolled `git for-each-ref 'refs/_shiplog/*'` loops: `*` does not cross `/`, so `journal/<env>`, `policy/current`, `trust/root` and `notes/logs` are skipped.
+2) Make sure every client uses the new root: the helper sets `git config shiplog.refRoot refs/heads/_shiplog` in the repo it ran in; other clones set it too, or export `SHIPLOG_REF_ROOT=refs/heads/_shiplog` (env wins over config).
+3) Update CI/automation to use the new ref names. Self-hosted servers running `contrib/hooks/pre-receive.shiplog` must export `SHIPLOG_REF_ROOT=refs/heads/_shiplog` in the hook environment, or the hook enforces nothing under the branch namespace.
 
 ## Switching Ref Root (Toggle Branch vs Custom Refs)
 
@@ -79,20 +85,23 @@ scripts/shiplog-migrate-ref-root.sh --to refs/heads/_shiplog --push
 scripts/shiplog-migrate-ref-root.sh --to refs/heads/_shiplog --remove-old --push
 ```
 
-Then point Shiplog at the new root for this repo:
+`git shiplog refs migrate ...` wraps the same script. The helper mirrors journals, anchors, policy, trust and notes, and writes `git config shiplog.refRoot <new root>` for the repository it ran in. Other clones need the same setting, or the per-process override:
 
 ```
 git config shiplog.refRoot refs/heads/_shiplog
-# or per-process:
+# or per-process (takes precedence over git config):
 export SHIPLOG_REF_ROOT=refs/heads/_shiplog
 ```
+
+Check what is in effect with `git shiplog refs root show` (add `--json` for scripts).
 
 To switch back to custom refs, mirror in reverse:
 
 ```
 scripts/shiplog-migrate-ref-root.sh --from refs/heads/_shiplog --to refs/_shiplog --push
-git config shiplog.refRoot refs/_shiplog
 ```
+
+Self-hosted servers: the pre-receive hook learns the root only from its own environment. Export `SHIPLOG_REF_ROOT` there to match the clients (see `contrib/README.md`).
 
 ### Update protection
 

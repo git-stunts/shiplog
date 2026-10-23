@@ -31,10 +31,10 @@
 #   require_signed   SHIPLOG_SIGN               shiplog.policy.requireSigned       deployment_requirements[ENV].require_signed     false
 #                                                                                  → deployment_requirements.default.require_signed
 #                                                                                  → require_signed
-#   notes ref        SHIPLOG_NOTES_REF          (none)                             notes_ref                                       refs/_shiplog/notes/logs
+#   notes ref        SHIPLOG_NOTES_REF          (none)                             notes_ref                                       <ref root>/notes/logs
 #
 # The policy document itself comes from the policy ref ($POLICY_REF, default
-# refs/_shiplog/policy/current) when it exists, otherwise from
+# <ref root>/policy/current) when it exists, otherwise from
 # <repo root>/.shiplog/policy.json. Relative signers paths resolve against the
 # repository root, never against $PWD.
 #
@@ -147,7 +147,7 @@ shiplog_policy_validate_file() {
 # exists. A policy ref without .shiplog/policy.json is an error, not an absence.
 shiplog_policy_document() {
   POLICY_DOC_PATH=""
-  local ref="${POLICY_REF:-refs/_shiplog/policy/current}"
+  local ref="${POLICY_REF:-${REF_ROOT:-refs/_shiplog}/policy/current}"
   if git rev-parse -q --verify "$ref" >/dev/null 2>&1; then
     local tmp
     tmp=$(mktemp) || die "shiplog: unable to create a temp file for the policy document"
@@ -316,17 +316,17 @@ shiplog_policy_load() {
     NOTES_REF="$POLICY_NOTES_REF"
     POLICY_SOURCE_NOTES_REF="$POLICY_SOURCE"
   else
-    NOTES_REF="${NOTES_REF:-refs/_shiplog/notes/logs}"
+    NOTES_REF="${NOTES_REF_DEFAULT:-${REF_ROOT:-refs/_shiplog}/notes/logs}"
     POLICY_SOURCE_NOTES_REF="default"
   fi
 
   # Only the true absence of a document yields defaults. Say so when signing
   # would otherwise be expected (signing requested, or a trust ref is present).
   if [ "$POLICY_SOURCE" = "default" ] && [ "${SHIPLOG_POLICY_QUIET:-0}" != "1" ] && [ "$in_repo" -eq 1 ]; then
-    local trust_ref="${TRUST_REF:-refs/_shiplog/trust/root}"
+    local trust_ref="${TRUST_REF:-${REF_ROOT:-refs/_shiplog}/trust/root}"
     if [ "$SHIPLOG_SIGN_EFFECTIVE" = 1 ] || git rev-parse -q --verify "$trust_ref" >/dev/null 2>&1; then
       printf '⚠️ shiplog: no policy document found (%s or .shiplog/policy.json); using built-in defaults for environment %s\n' \
-        "${POLICY_REF:-refs/_shiplog/policy/current}" "$env" >&2
+        "${POLICY_REF:-${REF_ROOT:-refs/_shiplog}/policy/current}" "$env" >&2
     fi
   fi
 

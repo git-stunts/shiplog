@@ -2,8 +2,8 @@
 set -euo pipefail
 
 JQ_BIN="${SHIPLOG_JQ_BIN:-/usr/local/bin/jq}"
-TRUST_REF="${SHIPLOG_TRUST_REF:-refs/_shiplog/trust/root}"
-POLICY_REF="${SHIPLOG_POLICY_REF:-refs/_shiplog/policy/current}"
+# TRUST_REF, POLICY_REF and the journal/anchors prefixes are derived from
+# SHIPLOG_REF_ROOT below (see "Ref root").
 REQUIRE_SEPARATE_SIGNERS="${SHIPLOG_REQUIRE_SEPARATE_SIGNERS:-1}"
 export SHIPLOG_REQUIRE_SEPARATE_SIGNERS="$REQUIRE_SEPARATE_SIGNERS"
 # Optional relaxations: allow missing trust/policy when signatures are not required.
@@ -174,6 +174,50 @@ debug_enabled() {
   esac
 }
 dbg() { debug_enabled && echo "shiplog[debug]: $*" >&2 || true; }
+
+# --- Ref root --------------------------------------------------------------
+# One root governs every Shiplog ref on this server (#115). SHIPLOG_REF_ROOT
+# (default refs/_shiplog) must match the root the clients use; TRUST_REF,
+# POLICY_REF and the journal/anchors prefixes derive from it. SHIPLOG_TRUST_REF
+# and SHIPLOG_POLICY_REF may still override the derived refs, but they must
+# live under the same root unless SHIPLOG_ALLOW_MIXED_REF_ROOT=1: a trust or
+# policy ref outside the root is almost always a misconfiguration that would
+# leave journals under the root unenforced.
+REF_ROOT="${SHIPLOG_REF_ROOT:-refs/_shiplog}"
+while [ -n "$REF_ROOT" ] && [ "$REF_ROOT" != "${REF_ROOT%/}" ]; do
+  REF_ROOT="${REF_ROOT%/}"
+done
+case "$REF_ROOT" in
+  refs/?*) ;;
+  *) error "SHIPLOG_REF_ROOT must be a ref prefix starting with refs/ (got '${SHIPLOG_REF_ROOT:-}')" ;;
+esac
+git check-ref-format --allow-onelevel "$REF_ROOT/x" >/dev/null 2>&1 \
+  || error "SHIPLOG_REF_ROOT is not a valid ref prefix: $REF_ROOT"
+TRUST_REF="${SHIPLOG_TRUST_REF:-$REF_ROOT/trust/root}"
+POLICY_REF="${SHIPLOG_POLICY_REF:-$REF_ROOT/policy/current}"
+JOURNAL_PREFIX="$REF_ROOT/journal"
+ANCHORS_PREFIX="$REF_ROOT/anchors"
+# Attached logs (git notes) under the root are append-only like journals:
+# deletion is refused and every update must be a fast-forward.
+NOTES_PREFIX="$REF_ROOT/notes"
+ALLOW_MIXED_REF_ROOT="${SHIPLOG_ALLOW_MIXED_REF_ROOT:-0}"
+
+ref_under_root() {
+  case "$1" in
+    "$REF_ROOT"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ "$ALLOW_MIXED_REF_ROOT" != "1" ]; then
+  ref_under_root "$TRUST_REF" \
+    || error "SHIPLOG_TRUST_REF=$TRUST_REF is outside the ref root $REF_ROOT; set SHIPLOG_REF_ROOT to the root the clients use, or SHIPLOG_ALLOW_MIXED_REF_ROOT=1 to accept a mixed layout"
+  ref_under_root "$POLICY_REF" \
+    || error "SHIPLOG_POLICY_REF=$POLICY_REF is outside the ref root $REF_ROOT; set SHIPLOG_REF_ROOT to the root the clients use, or SHIPLOG_ALLOW_MIXED_REF_ROOT=1 to accept a mixed layout"
+elif ! ref_under_root "$TRUST_REF" || ! ref_under_root "$POLICY_REF"; then
+  warn "SHIPLOG_ALLOW_MIXED_REF_ROOT=1: trust ($TRUST_REF) or policy ($POLICY_REF) lives outside the ref root $REF_ROOT"
+fi
+dbg "refs: root=$REF_ROOT trust=$TRUST_REF policy=$POLICY_REF journals=$JOURNAL_PREFIX/* anchors=$ANCHORS_PREFIX/* notes=$NOTES_PREFIX/*"
 
 if ! command -v "$JQ_BIN" >/dev/null 2>&1; then
   if command -v jq >/dev/null 2>&1; then
@@ -594,7 +638,7 @@ validate_journal_commit() {
 
 validate_journal_updates() {
   local env="$1" old="$2" new="$3"
-  ensure_fast_forward "$old" "$new" "refs/_shiplog/journal/$env"
+  ensure_fast_forward "$old" "$new" "$JOURNAL_PREFIX/$env"
   local require_signed allowlist
   if [ -n "$CURRENT_POLICY_JSON" ]; then
     require_signed=$(get_policy_require_signed "$env")
@@ -649,7 +693,7 @@ fi
 
 while read -r old_sha new_sha refname; do
   case "$refname" in
-    "$TRUST_REF"|"$POLICY_REF"|refs/_shiplog/journal/*|refs/_shiplog/anchors/*)
+    "$TRUST_REF"|"$POLICY_REF"|"$JOURNAL_PREFIX"/*|"$ANCHORS_PREFIX"/*|"$NOTES_PREFIX"/*)
       if [ "$new_sha" = "$ZERO_OID" ]; then
         refuse_delete "$refname"
         continue
@@ -668,11 +712,11 @@ while read -r old_sha new_sha refname; do
     "$POLICY_REF")
       validate_policy_update "$old_sha" "$new_sha"
       ;;
-    refs/_shiplog/journal/*)
-      env="${refname#refs/_shiplog/journal/}"
+    "$JOURNAL_PREFIX"/*)
+      env="${refname#"$JOURNAL_PREFIX"/}"
       validate_journal_updates "$env" "$old_sha" "$new_sha"
       ;;
-    refs/_shiplog/anchors/*)
+    "$ANCHORS_PREFIX"/*|"$NOTES_PREFIX"/*)
       ensure_fast_forward "$old_sha" "$new_sha" "$refname"
       ;;
     *)

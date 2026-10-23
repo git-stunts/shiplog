@@ -81,14 +81,24 @@ done
 . "$TRUST_VERIFY_LIB"
 export SHIPLOG_TRUST_NAMESPACE="$NAMESPACE"
 
+# Trust ref follows the configured ref root (SHIPLOG_TRUST_REF > SHIPLOG_REF_ROOT >
+# git config shiplog.refRoot > refs/_shiplog), for both the commit and the tip.
+TRUST_REF="${SHIPLOG_TRUST_REF:-}"
+if [ -z "$TRUST_REF" ]; then
+  TRUST_REF_ROOT="${SHIPLOG_REF_ROOT:-$(git config --get shiplog.refRoot 2>/dev/null || true)}"
+  TRUST_REF_ROOT="${TRUST_REF_ROOT:-refs/_shiplog}"
+  while [ "$TRUST_REF_ROOT" != "${TRUST_REF_ROOT%/}" ]; do TRUST_REF_ROOT="${TRUST_REF_ROOT%/}"; done
+  TRUST_REF="$TRUST_REF_ROOT/trust/root"
+fi
+
 TRUST_COMMIT="${1:-}"
-[ -n "$TRUST_COMMIT" ] || TRUST_COMMIT="$(git rev-parse --verify "${SHIPLOG_TRUST_REF:-refs/_shiplog/trust/root}" 2>/dev/null || true)"
-[ -n "$TRUST_COMMIT" ] || die "cannot resolve trust commit; pass COMMIT or set SHIPLOG_TRUST_REF"
+[ -n "$TRUST_COMMIT" ] || TRUST_COMMIT="$(git rev-parse --verify "$TRUST_REF" 2>/dev/null || true)"
+[ -n "$TRUST_COMMIT" ] || die "cannot resolve trust commit from $TRUST_REF; pass COMMIT or set SHIPLOG_TRUST_REF"
 git cat-file -e "$TRUST_COMMIT:trust.json" 2>/dev/null || die "trust.json not found at $TRUST_COMMIT:trust.json"
 
 payload_file="$(mktemp)"
 trap 'rm -f "$payload_file"' EXIT
-TRUST_TIP="$(git rev-parse -q --verify "${SHIPLOG_TRUST_REF:-refs/_shiplog/trust/root}" 2>/dev/null || true)"
+TRUST_TIP="$(git rev-parse -q --verify "$TRUST_REF" 2>/dev/null || true)"
 if [ -z "$PARENT" ]; then
   PARENT="$TRUST_TIP"
   if [ -n "$PARENT" ] && [ "$PARENT" = "$(git rev-parse -q --verify "$TRUST_COMMIT^{commit}" 2>/dev/null || true)" ]; then

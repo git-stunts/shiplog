@@ -147,7 +147,10 @@ PLUGIN
 }
 
 @test "SLT.BUG.LIB.006: journals_ref_prefix / anchors_ref_prefix are reserved and no longer parsed" {
-  run grep -rn 'POLICY_JOURNALS_PREFIX\|POLICY_ANCHORS_PREFIX\|journals_prefix\|anchors_prefix' "$SHIPLOG_PROJECT_ROOT/lib" "$SHIPLOG_PROJECT_ROOT/bin"
+  # Nothing reads the policy keys (jq .journals_ref_prefix / the old POLICY_* vars).
+  # `refs root show --json` has its own journals_prefix/anchors_prefix output
+  # fields, derived from the ref root, which are not policy parsing.
+  run grep -rn 'POLICY_JOURNALS_PREFIX\|POLICY_ANCHORS_PREFIX\|journals_ref_prefix\|anchors_ref_prefix' "$SHIPLOG_PROJECT_ROOT/lib" "$SHIPLOG_PROJECT_ROOT/bin"
   [ "$status" -ne 0 ]
   # Still accepted by the validator for forward compatibility.
   printf '{"version":"1.0.0","journals_ref_prefix":"refs/_shiplog/j2/","anchors_ref_prefix":"refs/_shiplog/a2/"}\n' > .shiplog/policy.json

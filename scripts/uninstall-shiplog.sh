@@ -202,16 +202,32 @@ ls_remote_tip() {
   printf '%s' "$out" | awk 'NR==1 {print $1}'
 }
 
-git_config_remove_refspec "remote.${REMOTE_NAME}.fetch" "+refs/_shiplog/*:refs/_shiplog/*"
-git_config_remove_refspec "remote.${REMOTE_NAME}.push" "refs/_shiplog/*:refs/_shiplog/*"
+# Shiplog refs live under one root (SHIPLOG_REF_ROOT > git config shiplog.refRoot >
+# refs/_shiplog); `git shiplog init` wrote refspecs for it. Handle the configured
+# root and the default one (refs left behind by a migration without --remove-old).
+SHIPLOG_ROOTS=("refs/_shiplog")
+configured_root="${SHIPLOG_REF_ROOT:-$(git config --get shiplog.refRoot 2>/dev/null || true)}"
+while [ -n "$configured_root" ] && [ "$configured_root" != "${configured_root%/}" ]; do
+  configured_root="${configured_root%/}"
+done
+case "$configured_root" in
+  refs/?*) [ "$configured_root" = "refs/_shiplog" ] || SHIPLOG_ROOTS=("$configured_root" "refs/_shiplog") ;;
+esac
+
+for root in "${SHIPLOG_ROOTS[@]}"; do
+  git_config_remove_refspec "remote.${REMOTE_NAME}.fetch" "+$root/*:$root/*"
+  git_config_remove_refspec "remote.${REMOTE_NAME}.push" "$root/*:$root/*"
+done
 
 unpublished_refs=()
 unknown_refs=()
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config --get "remote.${REMOTE_NAME}.url" >/dev/null 2>&1; then
   if command -v ssh >/dev/null 2>&1; then
-    if ! run git fetch "$REMOTE_NAME" 'refs/_shiplog/*:refs/_shiplog/*'; then
-      log "Warning: unable to fetch refs/_shiplog/*"
-    fi
+    for root in "${SHIPLOG_ROOTS[@]}"; do
+      if ! run git fetch "$REMOTE_NAME" "$root/*:$root/*"; then
+        log "Warning: unable to fetch $root/*"
+      fi
+    done
   else
     log "Warning: ssh client not available; skipping remote refs sync"
   fi
@@ -235,7 +251,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config --get "remo
     if git merge-base --is-ancestor "$remote_tip" "$local_tip" >/dev/null 2>&1; then
       unpublished_refs+=("$ref")
     fi
-  done < <(git for-each-ref --format='%(refname)' refs/_shiplog)
+  done < <(git for-each-ref --format='%(refname)' "${SHIPLOG_ROOTS[@]}")
 fi
 
 if [ ${#unpublished_refs[@]} -gt 0 ] && [ "$FORCE" -eq 0 ]; then
@@ -323,5 +339,5 @@ fi
 
 log "Shiplog uninstall complete"
 if [ "$SILENT" -ne 1 ]; then
-  echo "Remote refs under refs/_shiplog/* were left intact on your remotes; remove them manually only if you intend to delete history."
+  echo "Remote refs under ${SHIPLOG_ROOTS[0]}/* were left intact on your remotes; remove them manually only if you intend to delete history."
 fi

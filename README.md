@@ -132,6 +132,8 @@ Shiplog stores all its data in lightweight Git refs, separate from your main cod
 - **Trust**: `refs/_shiplog/trust/root` (Root of the trusted signers/keys)
 - **Notes**: Attachments (e.g., logs) under `refs/_shiplog/notes/logs` are associated with journal entries.
 
+All of them hang off one ref root (`refs/_shiplog` by default). `SHIPLOG_REF_ROOT` or `git config shiplog.refRoot` moves every ref together (e.g. to the branch namespace `refs/heads/_shiplog`), on the client and in the server hook; `git shiplog refs root show` prints the effective root and its source.
+
 Policy resolution merges CLI/env overrides, local repo config, the policy ref, and working fallbacks. See [`docs/features/policy.md`](./docs/features/policy.md).
 
 ---

@@ -6,7 +6,8 @@ Supporting assets that help you wire Shiplog into a larger deployment workflow.
 
 - `hooks/pre-receive.shiplog` – server-side guard (requires: git ≥ 2.35, jq ≥ 1.6, bash, OpenSSH 8.2+
   `ssh-keygen`). It enforces:
-  - fast-forward pushes to `refs/_shiplog/journal/*`, `refs/_shiplog/anchors/*`, the policy ref and the trust ref;
+  - fast-forward pushes to `<ref root>/journal/*`, `<ref root>/anchors/*`, `<ref root>/notes/*`, the policy ref and the trust ref
+    (the root is `SHIPLOG_REF_ROOT`, default `refs/_shiplog`; see the hook environment below);
   - **no deletions** of any Shiplog ref (`SHIPLOG_ALLOW_REF_DELETE=1` is the emergency override and logs a warning);
   - trust updates verified against the **prior** roster: attestation quorum counted in distinct, unrevoked
     maintainer keys; chain mode = one signed trust commit, threshold 1 only (decision D1);
@@ -37,7 +38,8 @@ chmod 0755 "$BARE/hooks/pre-receive"
 git --git-dir="$BARE" config receive.denyDeletes true
 git --git-dir="$BARE" config receive.denyNonFastForwards true
 
-echo "Hook installed. Export SHIPLOG_HOME=$SHIPLOG_SRC and SHIPLOG_REQUIRE_SIGNED_TRUST=1 in the hook environment."
+echo "Hook installed. Export SHIPLOG_HOME=$SHIPLOG_SRC and SHIPLOG_REQUIRE_SIGNED_TRUST=1 in the hook environment,"
+echo "plus SHIPLOG_REF_ROOT=refs/heads/_shiplog if your clients use the branch namespace."
 ```
 
 How the environment reaches hooks depends on your server (sshd `SetEnv`, a wrapper script that exports
@@ -61,6 +63,12 @@ exports an absolute `GIT_DIR` before running the verifier.
 ### Hook environment variables
 
 - `SHIPLOG_HOME` — Shiplog checkout on the server (required unless `lib/` is copied next to `hooks/`).
+- `SHIPLOG_REF_ROOT` — the ref root the server enforces (default `refs/_shiplog`). Set it to `refs/heads/_shiplog`
+  when clients use the branch namespace: the trust ref, policy ref, `journal/*`, `anchors/*` and `notes/*` prefixes all derive
+  from it, and pushes are matched by those prefixes. The client never tells the hook its root; without this the
+  hook silently ignores journals under `refs/heads/_shiplog/**`.
+- `SHIPLOG_TRUST_REF` / `SHIPLOG_POLICY_REF` — override the derived refs. They must live under `SHIPLOG_REF_ROOT`
+  or the hook refuses to start; `SHIPLOG_ALLOW_MIXED_REF_ROOT=1` accepts a mixed layout deliberately (warning logged).
 - `SHIPLOG_REQUIRE_SIGNED_TRUST=1` — the trust commit itself must be signed by a current maintainer. Default `0`.
   `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE` is ignored (a warning is printed); the quorum always applies.
 - `SHIPLOG_REQUIRE_SIGNED_POLICY` — default `1` when a trust ref exists, `0` otherwise.

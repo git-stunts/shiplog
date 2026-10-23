@@ -4,19 +4,33 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
 
 ## Core
 
-- `SHIPLOG_REF_ROOT` — Root for Shiplog refs
-  - Default: `refs/_shiplog`
+- `SHIPLOG_REF_ROOT` — Root for every Shiplog ref (client and hook)
+  - Precedence: `SHIPLOG_REF_ROOT` env > `git config shiplog.refRoot` > `refs/_shiplog`
   - Alternate (branch namespace): `refs/heads/_shiplog`
-  - Affects journals/policy/trust/notes ref resolution.
+  - Must start with `refs/`; a trailing slash is stripped; invalid values abort the command.
+  - Journals (`<root>/journal/<env>`), anchors (`<root>/anchors/<env>`), policy, trust and notes
+    all derive from it. `git shiplog refs root show` prints the effective root, its source and
+    every derived ref (`--json` for machines). The CLI exports the resolved `SHIPLOG_REF_ROOT`,
+    `SHIPLOG_POLICY_REF` and `SHIPLOG_TRUST_REF` to the helper scripts it runs.
+
+| Derived ref | Source | Default |
+|-------------|--------|---------|
+| Journals | `<root>/journal/<env>` | `refs/_shiplog/journal/<env>` |
+| Anchors | `<root>/anchors/<env>` | `refs/_shiplog/anchors/<env>` |
+| Policy | `SHIPLOG_POLICY_REF` > `<root>/policy/current` | `refs/_shiplog/policy/current` |
+| Trust | `SHIPLOG_TRUST_REF` > `<root>/trust/root` | `refs/_shiplog/trust/root` |
+| Notes | `SHIPLOG_NOTES_REF` > policy `notes_ref` > `<root>/notes/logs` | `refs/_shiplog/notes/logs` |
 
 - `SHIPLOG_POLICY_REF` — Policy ref (JSON file lives at `.shiplog/policy.json` inside the ref)
-  - Default: `refs/_shiplog/policy/current`
+  - Default: `<ref root>/policy/current`
 
-- `SHIPLOG_TRUST_REF` — Trust ref (tree with `.shiplog/trust.json` and `.shiplog/allowed_signers`)
-  - Default: `refs/_shiplog/trust/root`
+- `SHIPLOG_TRUST_REF` — Trust ref (tree with `trust.json` and `allowed_signers`)
+  - Default: `<ref root>/trust/root`
 
 - `SHIPLOG_NOTES_REF` — Git notes ref for attached logs (NDJSON)
-  - Default: `refs/_shiplog/notes/logs`
+  - Default: `<ref root>/notes/logs`; this variable wins over a policy `notes_ref` (see docs/features/policy.md).
+  - `write`, `show`, `export-json` and `publish` all resolve the same notes ref; `publish` refuses to
+    push a journal whose entries claim `log_attached=true` when that notes ref does not exist locally.
 
 - `SHIPLOG_ENV` — Default journal environment when omitted on commands
   - Default: `prod`
@@ -63,6 +77,10 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
   - Default: `1` when a trust ref exists on the server, `0` otherwise (so a fresh server can receive its first policy before trust).
 
 - `SHIPLOG_ALLOW_REF_DELETE` — Hook: when `1`, deleting a Shiplog ref (`git push origin :refs/_shiplog/...`) is permitted and a warning is logged. Default: deletions are refused.
+
+- `SHIPLOG_REF_ROOT` (hook) — The ref root the server enforces. Default `refs/_shiplog`; set it to `refs/heads/_shiplog` when clients use the branch namespace. The hook derives the trust ref (`<root>/trust/root`), the policy ref (`<root>/policy/current`) and the journal/anchors/notes prefixes from it (notes are append-only: no deletion, fast-forward only) and matches pushed refs by those prefixes, so journals under the configured root are validated whichever layout you chose. The hook is not told the root by the client: it must be exported in the hook environment.
+
+- `SHIPLOG_ALLOW_MIXED_REF_ROOT` — Hook: by default the hook refuses to start when `SHIPLOG_TRUST_REF` or `SHIPLOG_POLICY_REF` points outside `SHIPLOG_REF_ROOT` (a mixed layout usually means journals under the root would go unenforced). Set `1` to accept a mixed layout deliberately; a warning is logged.
 
 - `SHIPLOG_SIGN_TRUST` — `scripts/shiplog-bootstrap-trust.sh`: sign the genesis trust commit (`1`) or not (`0`).
   - Default: `1` when `git config user.signingkey` is set, otherwise `0` with a printed hint. `SHIPLOG_TRUST_SIGN` is a deprecated alias.
