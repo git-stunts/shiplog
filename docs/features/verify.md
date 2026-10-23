@@ -13,7 +13,7 @@ git shiplog verify [ENV]
 
 ## Behavior
 - Resolves policy inputs from multiple sources in order of precedence: environment variables, git config, working tree, then policy ref.
-- Uses `git verify-commit` (with `GIT_SSH_ALLOWED_SIGNERS` when provided) to check signatures when required by policy.
+- Uses `git -c gpg.ssh.allowedSignersFile=<roster> verify-commit` to check signatures against the resolved allowed-signers file when required by policy.
 - Scans all entries and prints a summary: `Verified: OK=<n>, BadSig=<n>, Unauthorized=<n>`.
 - Exit code is non‑zero if any bad signatures or unauthorized authors are found; zero otherwise.
 

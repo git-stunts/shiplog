@@ -11,7 +11,7 @@
     "Verify release build/tests across matrix",
     "Tag v0.3.0 and push tags"
   ],
-  "blocked_by": ["SLT.ALPHA.026", "SLT.ALPHA.023"],
+  "blocked_by": ["SLT.ALPHA.033", "SLT.ALPHA.023"],
   "notes": ["Consider a GitHub Release with notes and links"],
   "created": "2025-10-05",
   "updated": "2025-10-05",

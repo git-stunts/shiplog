@@ -8,6 +8,14 @@ README_TASKS="$TASK_DIR/README.md"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1" >&2; exit 1; }; }
 need jq
 
+# Refuse to run as a silent no-op: both markers must exist in the README.
+for marker in '<!-- tasks-moc:start -->' '<!-- tasks-moc:end -->'; do
+  if ! grep -qF "$marker" "$README_TASKS"; then
+    echo "Missing marker $marker in $README_TASKS; nothing updated" >&2
+    exit 1
+  fi
+done
+
 tmp_json=$(mktemp)
 tmp_out=$(mktemp)
 
@@ -26,7 +34,8 @@ for state in "${state_dirs[@]}"; do
     ms=$(printf '%s' "$json" | jq -r '.milestone // empty' || true)
     [ -n "$id" ] || continue
     [ -n "$ms" ] || ms="Unknown"
-    path="${f#$ROOT_DIR/}"
+    # Links are rendered inside docs/tasks/README.md, so emit paths relative to docs/tasks/.
+    path="${f#"$TASK_DIR"/}"
     if [ $first -eq 0 ]; then printf ',' >>"$tmp_json"; fi
     first=0
     printf '{' >>"$tmp_json"
@@ -42,8 +51,10 @@ for state in "${state_dirs[@]}"; do
 done
 printf ']\n' >>"$tmp_json"
 
-for ms in MVP Alpha Beta "v1.0.0"; do
-  printf '### %s\n' "$ms" >>"$tmp_out"
+for ms in MVP Alpha Beta "v1.0.0" HOTFIX; do
+  heading="$ms"
+  [ "$ms" = "HOTFIX" ] && heading="HOTFIX (unscored)"
+  printf '### %s\n\n' "$heading" >>"$tmp_out"
   for st in backlog active complete; do
     count=$(jq --arg ms "$ms" --arg st "$st" -r '[ .[] | select(.milestone==$ms and .state==$st) ] | length' "$tmp_json")
     if [ "$count" -gt 0 ]; then

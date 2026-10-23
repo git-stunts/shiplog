@@ -12,6 +12,12 @@ setup() {
 
 teardown() {
   shiplog_cleanup_sandbox_repo
+  # Bare origins created by individual tests (no EXIT traps: bats-core owns
+  # the EXIT trap and overriding it hides failure output, #148).
+  if [ -n "${ORIGIN2_DIR:-}" ] && [ -d "$ORIGIN2_DIR" ]; then
+    rm -rf "$ORIGIN2_DIR"
+  fi
+  unset ORIGIN2_DIR
 }
 
 @test "setup open writes policy and updates ref" {
@@ -96,7 +102,6 @@ teardown() {
 @test "setup strict env-driven auto-pushes trust to origin" {
   # Prepare origin
   ORIGIN2_DIR=$(mktemp -d)
-  trap "rm -rf '$ORIGIN2_DIR'" EXIT
   git remote remove origin >/dev/null 2>&1 || true
   git init --bare "$ORIGIN2_DIR"
   git remote add origin "$ORIGIN2_DIR"
@@ -218,4 +223,34 @@ teardown() {
   # Ref unchanged (no sync on dry-run)
   after_ref=$(git rev-parse -q --verify refs/_shiplog/policy/current 2>/dev/null || echo "")
   [ "$before_ref" = "$after_ref" ]
+}
+
+# --- SLT.BUG.LIB.014: --authors applies to every strictness level ----
+
+@test "setup strict honors --authors" {
+  run git shiplog --boring setup --strictness strict --authors a@x --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"default_allowlist"* ]]
+  [[ "$output" == *"a@x"* ]]
+}
+
+@test "setup strict defaults the allowlist to git config user.email" {
+  run git shiplog --boring setup --strictness strict --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"default_allowlist"* ]]
+  [[ "$output" == *"shiplog-tester@example.com"* ]]
+}
+
+@test "setup balanced includes user.email alongside --authors; open writes no allowlist without --authors" {
+  run git shiplog --boring setup --strictness balanced --authors other@example.com --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"other@example.com"* ]]
+  [[ "$output" == *"shiplog-tester@example.com"* ]]
+  run git shiplog --boring setup --strictness open --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"default_allowlist"* ]]
+  run git shiplog --boring setup --strictness open --authors a@x --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"default_allowlist"* ]]
+  [[ "$output" == *"a@x"* ]]
 }

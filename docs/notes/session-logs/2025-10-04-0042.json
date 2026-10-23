@@ -1,0 +1,62 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Commit README/docs changes on a docs branch and open PR"
+    },
+    {
+      "owner": "assistant",
+      "task": "Add brief Git Hosts note to project site/docs index"
+    }
+  ],
+  "date": "2025-10-04",
+  "key_decisions": [
+    "Support both trust modes; keep choice per-repo with simple guidance",
+    "Recommend branch namespace + Required Checks on SaaS; hooks on self-hosted",
+    "Document explicit publish and autoPush precedence prominently"
+  ],
+  "summary": "Rewrote README and cross-linked hosting docs; added Git Hosts section, trust-mode guidance, and publish/auto-push notes.",
+  "time": "00:42",
+  "topics": [
+    {
+      "context": "User asked for a clear, memorable README aligned to current features",
+      "future_work": "Add diagrams/screenshots and a short FAQ",
+      "issue": "Prior README mixed narrative with missing hosting guidance",
+      "resolution": "Reorganized sections, added links, concise examples",
+      "time_percent": 45,
+      "topic": "README rewrite",
+      "what": "Structured Quick Start, Core Concepts, live vs roadmap",
+      "why": "Clarify scope and make landing page star-worthy"
+    },
+    {
+      "context": "docs/hosting/matrix.md existed but wasn’t cross-linked everywhere",
+      "future_work": "Add CI workflow snippets inline for each host",
+      "issue": "Users may miss SaaS limitations and branch-namespace advice",
+      "resolution": "Added prominent links and short recommendations",
+      "time_percent": 25,
+      "topic": "Hosting cross-links",
+      "what": "Linked github guide to matrix; added README Git Hosts section",
+      "why": "SaaS vs self-host enforcement differs and confuses users"
+    },
+    {
+      "context": "New `git shiplog publish` command and `shiplog.autoPush` config",
+      "future_work": "Consider flipping default in a future minor release",
+      "issue": "README lacked guidance on when refs actually push",
+      "resolution": "Added section with examples and precedence",
+      "time_percent": 15,
+      "topic": "Auto-push & publish",
+      "what": "Documented precedence and explicit publish command",
+      "why": "Pre-push hooks disrupt deploys; users want a finalize step"
+    },
+    {
+      "context": "TRUST.md holds details; README needs summary",
+      "future_work": "Add a one-page questionnaire and CLI wizard",
+      "issue": "Choice was under-explained on the landing page",
+      "resolution": "Concise pros/cons with pointers to TRUST.md",
+      "time_percent": 15,
+      "topic": "Trust modes synopsis",
+      "what": "Explained chain vs attestation and quick pick",
+      "why": "Help teams choose without deep-diving docs first"
+    }
+  ]
+}

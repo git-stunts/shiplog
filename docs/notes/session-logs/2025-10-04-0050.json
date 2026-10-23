@@ -1,0 +1,62 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Commit and open PR for docs updates"
+    },
+    {
+      "owner": "assistant",
+      "task": "Add GitLab/Bitbucket CI templates mirroring GitHub workflows"
+    }
+  ],
+  "date": "2025-10-04",
+  "key_decisions": [
+    "Recommend enabling trust-commit signature gate in production",
+    "Encourage branch namespace + Required Checks on SaaS hosts",
+    "Document precedence: flags > git config > env"
+  ],
+  "summary": "Updated TRUST gate docs, env reference, hosting matrix/runbook, command reference, write docs, and release notes to reflect publish/auto-push precedence and SaaS vs self-host enforcement.",
+  "time": "00:50",
+  "topics": [
+    {
+      "context": "Gate defaults off; recommended on in production; SaaS requires checks",
+      "future_work": "Add tests for gate=1 path and include examples in runbook",
+      "issue": "Docs previously implied always-on signature requirement",
+      "resolution": "Added explicit gate section to TRUST.md and env reference",
+      "time_percent": 35,
+      "topic": "Trust gate & env",
+      "what": "Documented SHIPLOG_REQUIRE_SIGNED_TRUST with defaults and recommendations",
+      "why": "Prevent confusion about signature requirements and broken tests"
+    },
+    {
+      "context": "Examples existed but weren’t linked from guidance pages",
+      "future_work": "Add snippets for GitLab/Bitbucket equivalents",
+      "issue": "Users might miss JSON imports and CI verify flows",
+      "resolution": "Added links and clearer recommendations",
+      "time_percent": 25,
+      "topic": "Hosting guidance",
+      "what": "Linked matrix to ruleset/workflow examples and added resources",
+      "why": "Make SaaS protections prescriptive and discoverable"
+    },
+    {
+      "context": "New publish command and repo config shiplog.autoPush",
+      "future_work": "Consider default flip and deprecation notice in a future minor",
+      "issue": "Precedence and examples were scattered",
+      "resolution": "Centralized in README, command-reference, write.md, env.md",
+      "time_percent": 20,
+      "topic": "Auto-push & publish",
+      "what": "Clarified precedence and added docs to command/env references",
+      "why": "Avoid pre-push hook disruption during deploys"
+    },
+    {
+      "context": "Old FAQ said per-env was future; now supported",
+      "future_work": "Add a small diagram for trust modes",
+      "issue": "Drift between docs and behavior",
+      "resolution": "Updated modes.md with per-env example and wizard flag",
+      "time_percent": 20,
+      "topic": "Feature docs polish",
+      "what": "ls missing-values policy; run confirmation; modes per-env strictness",
+      "why": "Align docs to current behavior and per-env support"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ Note: The host‑aware questionnaire lives under `git shiplog config --interacti
 
 ## Usage
 
-```
+```bash
 git shiplog setup \
   [--strictness open|balanced|strict] \
   [--authors "a@x b@y"] \
@@ -20,12 +20,13 @@ SHIPLOG_SETUP_STRICT_ENVS="prod staging" \
 SHIPLOG_SETUP_AUTHORS="you@example.com teammate@example.com" \
 SHIPLOG_SETUP_AUTO_PUSH=1 \
   git shiplog setup
+```
 
 ### Choose a Trust Signing Mode (chain vs attestation)
 
 When bootstrapping trust, you can pick how quorum signatures are recorded and verified:
 
-- `chain` — co‑sign chain of commits (pure Git; great with server hooks)
+- `chain` — one signed trust commit (pure Git; threshold 1 only)
 - `attestation` — detached signatures stored under `.shiplog/trust_sigs/` (great for PRs on SaaS hosts)
 
 Set explicitly via flags or env during setup/bootstrap:
@@ -41,15 +42,17 @@ See docs/TRUST.md for details and a comparison.
 
 - Open (unsigned):
   - Policy: `require_signed=false`.
+  - Allowlist: none, unless `--authors` / `SHIPLOG_SETUP_AUTHORS` is given (then `authors.default_allowlist` holds exactly those emails).
   - Use when adopting Shiplog quickly or experimenting.
 
 - Balanced (unsigned + allowlist):
   - Policy: `require_signed=false`, with `authors.default_allowlist` populated.
-  - Wizard includes your current `git config user.email` and any emails from `SHIPLOG_SETUP_AUTHORS`.
+  - Allowlist: your current `git config user.email` plus any emails from `--authors` / `SHIPLOG_SETUP_AUTHORS`.
 
 - Strict (signed):
   - Global strict: `require_signed=true` for all environments.
   - Per‑environment strict: `require_signed=false` globally and `deployment_requirements.<env>.require_signed=true` for selected envs (e.g., prod only).
+  - Allowlist: the emails from `--authors` / `SHIPLOG_SETUP_AUTHORS`; when absent, your current `git config user.email`.
   - Non‑interactive trust bootstrap supported via `SHIPLOG_TRUST_*` env vars (see docs/features/modes.md). The wizard runs the bootstrap script and can auto‑push the trust ref with `--auto-push`.
   - Signing mode: pass `--trust-sig-mode chain|attestation` (default `chain`).
 
@@ -63,19 +66,21 @@ Example:
 git shiplog setup \
   --strictness strict \
   --trust-id shiplog-trust-root \
-  --trust-threshold 2 \
+  --trust-threshold 1 \
   --trust-maintainer "name=Alice,email=alice@example.com,key=~/.ssh/alice.pub,principal=alice@example.com" \
   --trust-maintainer "name=Bob,email=bob@example.com,key=~/.ssh/bob.pub,principal=bob@example.com" \
   --auto-push
 ```
 
 Flags (repeat `--trust-maintainer` as needed):
+
 - `--trust-id ID`
-- `--trust-threshold N` (≤ number of maintainers)
+- `--trust-threshold N` (≤ number of maintainers). The default `chain` mode accepts only `1`; the pre-receive hook rejects a chain-mode trust ref with a higher threshold. For N-of-M approval use `--trust-sig-mode attestation` and collect each maintainer's attestation before pushing (see [docs/TRUST.md](../TRUST.md)).
 - `--trust-message "Commit message"` (optional)
 - `--trust-maintainer "name=<n>,email=<e>,key=<ssh_pub_path>[,principal=<p>][,role=<r>][,revoked=<yes|no>][,pgp=<fpr>]"`
 
 Notes:
+
 - In CI/non‑TTY: if these flags (or the `SHIPLOG_TRUST_*` envs) are not set, trust bootstrap is skipped for per‑env strictness or fails fast for global strictness instead of prompting.
 
 ## Dry Run
@@ -84,8 +89,8 @@ Notes:
 
 ## Auto‑Push
 
-- `--auto-push` (or `SHIPLOG_SETUP_AUTO_PUSH=1`) pushes the policy ref to origin after syncing; `--no-auto-push` disables.
-- In Strict mode, if trust was bootstrapped non‑interactively and origin is configured, the wizard also pushes the trust ref.
+- `--auto-push` (or `SHIPLOG_SETUP_AUTO_PUSH=1`) pushes the policy ref to the Shiplog remote after syncing (`SHIPLOG_REMOTE` or `git config shiplog.remote`, default `origin`; pushes use `--no-verify`); `--no-auto-push` disables.
+- If a trust ref exists locally and the Shiplog remote is configured, the wizard also pushes the trust ref.
 
 ## Server Guidance
 

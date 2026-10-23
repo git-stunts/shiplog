@@ -1,0 +1,47 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Share reusable path canonicalization helpers between hook and CLI"
+    }
+  ],
+  "date": "2025-10-09",
+  "key_decisions": [
+    "Trusted validator search now permits repo scripts even when SHIPLOG_HOME is unset",
+    "CLI/jq validation propagates original stderr and exit codes to callers"
+  ],
+  "summary": "Locked down policy validator plumbing, restored require_where enforcement, and ensured CLI/jq errors surface with full diagnostics while keeping the Dockerized suite green.",
+  "time": "19:05",
+  "topics": [
+    {
+      "context": "Pre-receive hook is executed server-side with elevated privileges",
+      "future_work": "Deduplicate path safety helpers across hooks and CLI",
+      "issue": "Validators outside contrib/ were rejected and fatal errors only appeared in debug mode",
+      "resolution": "Whitelisted canonical repo paths, enforced stderr printing before fail-closed exits",
+      "time_percent": 40,
+      "topic": "Hook validator security",
+      "what": "Expanded SAFE_PREFIXES to cover repo scripts and echoed validator/jq stderr on failures",
+      "why": "Review feedback flagged missing repo-root coverage and hidden diagnostics"
+    },
+    {
+      "context": "Policy schema expects the documented require_where values",
+      "future_work": "Mirror allowed-values list from schema automatically",
+      "issue": "Invalid jq constructs and missing allowlist let unsupported entries through",
+      "resolution": "Simplified helper logic and added regression coverage via policy_validate tests",
+      "time_percent": 35,
+      "topic": "Policy filter correctness",
+      "what": "Fixed require_where_ok to use is_string_array/all() properly and reintroduced allowed-value enforcement",
+      "why": "Prior jq filter failed to parse and skipped guardrails"
+    },
+    {
+      "context": "CLI previously collapsed exit codes and swallowed messages",
+      "future_work": "Add CLI option to dump validator path provenance",
+      "issue": "Die path hid stderr text and returned generic errors",
+      "resolution": "Printed captured stderr, preserved validator status, reran `make test` to confirm",
+      "time_percent": 25,
+      "topic": "CLI/user feedback",
+      "what": "Surfaced jq validator stderr/exit codes through git shiplog policy validate and refreshed Docker Bats",
+      "why": "Users need actionable errors when jq/filter fails"
+    }
+  ]
+}

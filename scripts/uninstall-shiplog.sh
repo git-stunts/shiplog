@@ -11,12 +11,24 @@ else
   exit 1
 fi
 
+GUARD_LIB="$SCRIPT_ROOT/scripts/lib/install-guard.sh"
+if [ -f "$GUARD_LIB" ]; then
+  # shellcheck source=scripts/lib/install-guard.sh
+  . "$GUARD_LIB"
+else
+  echo "uninstall-shiplog: missing $GUARD_LIB" >&2
+  exit 1
+fi
+SHIPLOG_GUARD_LABEL="shiplog-uninstall"
+
+REPO_URL=${SHIPLOG_REPO_URL:-https://github.com/flyingrobots/shiplog.git}
 INSTALL_DIR=${SHIPLOG_HOME:-$HOME/.shiplog}
 PROFILE_FILE=${SHIPLOG_PROFILE:-}
 DRY_RUN=0
 SILENT=0
 NO_BACKUP=0
 FORCE=0
+FORCE_UNSAFE=0
 
 REMOTE_NAME=$(shiplog_remote_name)
 
@@ -27,12 +39,20 @@ Shiplog uninstaller
 Usage: uninstall-shiplog.sh [options]
 
 Options:
-  --dry-run       show actions without performing them
+  --dry-run       show actions without performing them (runs the same safety checks)
   --silent        reduce logging
   --no-backup     do not create profile backups before editing
   --profile FILE  explicit profile to edit (default: auto-detect)
   --force         proceed even if local refs are ahead of origin
+  --force-unsafe  skip the "is this a Shiplog checkout" check on SHIPLOG_HOME
+                  (the deny-list, allowed-base and symlink checks still apply)
   -h, --help      show this help
+
+Environment:
+  SHIPLOG_HOME           install directory to remove (default: $HOME/.shiplog)
+  SHIPLOG_REPO_URL       expected remote.origin.url of the checkout
+  SHIPLOG_ALLOWED_BASES  colon-separated bases the install dir must live under
+                         (default: $HOME:/opt/shiplog)
 USAGE
 }
 
@@ -80,6 +100,7 @@ while [ $# -gt 0 ]; do
       PROFILE_FILE="$1"
       ;;
     --force) FORCE=1 ;;
+    --force-unsafe) FORCE_UNSAFE=1 ;;
     -h|--help)
       usage
       exit 0
@@ -107,11 +128,38 @@ if [ -z "$PROFILE_FILE" ]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Safety gate: decide up front whether SHIPLOG_HOME may be removed. Nothing is
+# mutated before this point, and a refusal exits non-zero under --dry-run too.
+# ---------------------------------------------------------------------------
+if ! RESOLVED_INSTALL_DIR=$(shiplog_guard_install_dir "$INSTALL_DIR" path "$REPO_URL"); then
+  exit 1
+fi
+INSTALL_DIR="$RESOLVED_INSTALL_DIR"
+
+REMOVE_INSTALL_DIR=0
+if [ -e "$INSTALL_DIR" ]; then
+  if [ ! -d "$INSTALL_DIR" ]; then
+    echo "shiplog-uninstall: refusing: $INSTALL_DIR exists and is not a directory" >&2
+    exit 1
+  fi
+  if [ "$FORCE_UNSAFE" -eq 1 ]; then
+    log "Warning: --force-unsafe given; skipping Shiplog checkout verification for $INSTALL_DIR"
+    export SHIPLOG_GUARD_SKIP_CHECKOUT_CHECK=1
+  fi
+  if ! shiplog_guard_install_dir "$INSTALL_DIR" destructive "$REPO_URL" >/dev/null; then
+    echo "shiplog-uninstall: refusing to remove $INSTALL_DIR (not a Shiplog checkout cloned from $REPO_URL)." >&2
+    echo "                   Set SHIPLOG_HOME to the Shiplog install directory, or remove it manually." >&2
+    exit 1
+  fi
+  REMOVE_INSTALL_DIR=1
+fi
+
 git_config_remove_refspec() {
   local key="$1" target="$2"
   local values=()
   mapfile -t values < <(git config --get-all "$key" 2>/dev/null || true)
-  [ ${#values[@]} -gt 0 ] || return
+  [ ${#values[@]} -gt 0 ] || return 0
 
   local keep=()
   for val in "${values[@]}"; do
@@ -121,32 +169,65 @@ git_config_remove_refspec() {
   done
 
   if [ ${#keep[@]} -eq ${#values[@]} ]; then
-    return
+    return 0
   fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "+ git config --unset-all $key"
-    for val in "${keep[@]}"; do
+    for val in ${keep[@]+"${keep[@]}"}; do
       echo "+ git config --add $key '$val'"
     done
     return
   fi
 
   git config --unset-all "$key" || true
-  for val in "${keep[@]}"; do
+  for val in ${keep[@]+"${keep[@]}"}; do
     git config --add "$key" "$val"
   done
 }
 
-git_config_remove_refspec "remote.${REMOTE_NAME}.fetch" "+refs/_shiplog/*:refs/_shiplog/*"
-git_config_remove_refspec "remote.${REMOTE_NAME}.push" "refs/_shiplog/*:refs/_shiplog/*"
+# git ls-remote bounded by `timeout` only when that (non-POSIX) tool exists;
+# otherwise rely on git's own transport timeouts. Prints the remote tip (or
+# nothing when the ref is absent) and returns ls-remote's exit status, so the
+# caller can tell "ref not on remote" from "remote unreachable".
+ls_remote_tip() {
+  local remote="$1" ref="$2"
+  local out rc=0
+  if command -v timeout >/dev/null 2>&1; then
+    out=$(timeout 30 git ls-remote "$remote" "$ref" 2>/dev/null) || rc=$?
+  else
+    out=$(git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=30 ls-remote "$remote" "$ref" 2>/dev/null) || rc=$?
+  fi
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf '%s' "$out" | awk 'NR==1 {print $1}'
+}
+
+# Shiplog refs live under one root (SHIPLOG_REF_ROOT > git config shiplog.refRoot >
+# refs/_shiplog); `git shiplog init` wrote refspecs for it. Handle the configured
+# root and the default one (refs left behind by a migration without --remove-old).
+SHIPLOG_ROOTS=("refs/_shiplog")
+configured_root="${SHIPLOG_REF_ROOT:-$(git config --get shiplog.refRoot 2>/dev/null || true)}"
+while [ -n "$configured_root" ] && [ "$configured_root" != "${configured_root%/}" ]; do
+  configured_root="${configured_root%/}"
+done
+case "$configured_root" in
+  refs/?*) [ "$configured_root" = "refs/_shiplog" ] || SHIPLOG_ROOTS=("$configured_root" "refs/_shiplog") ;;
+esac
+
+for root in "${SHIPLOG_ROOTS[@]}"; do
+  git_config_remove_refspec "remote.${REMOTE_NAME}.fetch" "+$root/*:$root/*"
+  git_config_remove_refspec "remote.${REMOTE_NAME}.push" "$root/*:$root/*"
+done
 
 unpublished_refs=()
+unknown_refs=()
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config --get "remote.${REMOTE_NAME}.url" >/dev/null 2>&1; then
   if command -v ssh >/dev/null 2>&1; then
-    if ! run git fetch "$REMOTE_NAME" 'refs/_shiplog/*:refs/_shiplog/*'; then
-      log "Warning: unable to fetch refs/_shiplog/*"
-    fi
+    for root in "${SHIPLOG_ROOTS[@]}"; do
+      if ! run git fetch "$REMOTE_NAME" "$root/*:$root/*"; then
+        log "Warning: unable to fetch $root/*"
+      fi
+    done
   else
     log "Warning: ssh client not available; skipping remote refs sync"
   fi
@@ -154,7 +235,12 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config --get "remo
     [ -n "$ref" ] || continue
     local_tip=$(git rev-parse "$ref" 2>/dev/null || echo "")
     [ -n "$local_tip" ] || continue
-    remote_tip=$(timeout 30 git ls-remote "$REMOTE_NAME" "$ref" 2>/dev/null | awk '{print $1}' || echo "")
+    remote_tip=""
+    if ! remote_tip=$(ls_remote_tip "$REMOTE_NAME" "$ref"); then
+      log "Warning: remote $REMOTE_NAME unreachable while checking $ref; publication state unknown"
+      unknown_refs+=("$ref")
+      continue
+    fi
     if [ -z "$remote_tip" ]; then
       unpublished_refs+=("$ref")
       continue
@@ -165,7 +251,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config --get "remo
     if git merge-base --is-ancestor "$remote_tip" "$local_tip" >/dev/null 2>&1; then
       unpublished_refs+=("$ref")
     fi
-  done < <(git for-each-ref --format='%(refname)' refs/_shiplog)
+  done < <(git for-each-ref --format='%(refname)' "${SHIPLOG_ROOTS[@]}")
 fi
 
 if [ ${#unpublished_refs[@]} -gt 0 ] && [ "$FORCE" -eq 0 ]; then
@@ -181,6 +267,20 @@ if [ ${#unpublished_refs[@]} -gt 0 ] && [ "$FORCE" -eq 1 ] && [ "$SILENT" -ne 1 
   log "Proceeding despite unpushed refs: ${unpublished_refs[*]}"
 fi
 
+if [ ${#unknown_refs[@]} -gt 0 ] && [ "$SILENT" -ne 1 ]; then
+  log "Could not verify publication of: ${unknown_refs[*]} (remote unreachable). Local refs in this repository are not removed by the uninstaller."
+fi
+
+# same_content A B: both are regular files with identical bytes. Uses git (a hard
+# dependency) rather than cmp, which minimal arch/fedora images do not ship.
+same_content() {
+  [ -f "$1" ] && [ -f "$2" ] || return 1
+  local a b
+  a=$(git hash-object --no-filters -- "$1" 2>/dev/null) || return 1
+  b=$(git hash-object --no-filters -- "$2" 2>/dev/null) || return 1
+  [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
 GIT_SHIPLOG_TARGET="$INSTALL_DIR/bin/git-shiplog"
 BOSUN_TARGET="$INSTALL_DIR/scripts/bosun"
 
@@ -188,7 +288,7 @@ if [ -e "/usr/local/bin/git-shiplog" ]; then
   if [ -L "/usr/local/bin/git-shiplog" ] && [ "$(readlink "/usr/local/bin/git-shiplog")" = "$GIT_SHIPLOG_TARGET" ]; then
     log "Removing /usr/local/bin/git-shiplog"
     run rm -f /usr/local/bin/git-shiplog
-  elif cmp -s "/usr/local/bin/git-shiplog" "$GIT_SHIPLOG_TARGET" 2>/dev/null; then
+  elif same_content "/usr/local/bin/git-shiplog" "$GIT_SHIPLOG_TARGET"; then
     log "Removing /usr/local/bin/git-shiplog (matching installed copy)"
     run rm -f /usr/local/bin/git-shiplog
   else
@@ -204,14 +304,14 @@ for shim in shiplog bosun; do
     if [ -L "$shim_path" ] && [ "$(readlink "$shim_path")" = "$target" ]; then
       log "Removing $shim shim at $shim_path"
       run rm -f "$shim_path"
-    elif cmp -s "$shim_path" "$target" 2>/dev/null; then
+    elif same_content "$shim_path" "$target"; then
       log "Removing $shim shim at $shim_path (matching installed copy)"
       run rm -f "$shim_path"
     fi
   fi
 done
 
-if [ -d "$INSTALL_DIR" ]; then
+if [ "$REMOVE_INSTALL_DIR" -eq 1 ]; then
   log "Removing $INSTALL_DIR"
   run rm -rf "$INSTALL_DIR"
 else
@@ -239,5 +339,5 @@ fi
 
 log "Shiplog uninstall complete"
 if [ "$SILENT" -ne 1 ]; then
-  echo "Remote refs under refs/_shiplog/* were left intact on your remotes; remove them manually only if you intend to delete history."
+  echo "Remote refs under ${SHIPLOG_ROOTS[0]}/* were left intact on your remotes; remove them manually only if you intend to delete history."
 fi
