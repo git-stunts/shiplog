@@ -1134,6 +1134,11 @@ EOF
     SHIPLOG_BORING=1; export SHIPLOG_BORING
   fi
 
+  # `show -- -x` reaches here with a leading dash; git would parse it as an
+  # option (`--output=FILE` writes a file), so it is never a valid target.
+  case "$target" in
+    -*) die "shiplog: invalid target '$target' (must not start with '-')" ;;
+  esac
   if [ -z "$target" ]; then
     target="$(ref_journal "$DEFAULT_ENV")"
   fi

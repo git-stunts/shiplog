@@ -347,3 +347,23 @@ line_count() {
   [ "$(line_count "$output")" -eq 1 ]
   printf '%s\n' "$output" | jq -e '.commit and .seq != null' >/dev/null
 }
+
+@test "g7b show/validate-trailer: a target starting with - is rejected, never passed to git as an option" {
+  git shiplog write >/dev/null
+  local out="$BATS_TEST_TMPDIR/injected.out"
+  rm -f "$out"
+  run git shiplog show -- "--output=$out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must not start with '-'"* ]]
+  [ ! -e "$out" ]
+  run git shiplog show --json -- "--output=$out"
+  [ "$status" -ne 0 ]
+  [ ! -e "$out" ]
+  run git shiplog validate-trailer -- "--output=$out"
+  [ "$status" -ne 0 ]
+  [ ! -e "$out" ]
+  # Positive control: the default target still works
+  run git shiplog show --json
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | jq -e '.seq' >/dev/null
+}
