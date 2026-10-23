@@ -1076,14 +1076,21 @@ EOF
 
 cmd_ls() {
   ensure_in_repo
-  case "${1:-}" in
-    --help|-h)
-      printf 'Usage: git shiplog ls [ENV] [LIMIT]\n\nList the most recent LIMIT entries (default 20) of the ENV journal.\n'
-      return 0 ;;
-    -*) die "shiplog: unknown ls option: $1 (see git shiplog ls --help)" ;;
-  esac
-  local env="${1:-$DEFAULT_ENV}"
-  local limit="${2:-20}"
+  # `--` after the command name now reaches the subcommand (see the global
+  # parser), so it must end option parsing here instead of being an unknown flag.
+  local -a pos=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --help|-h)
+        printf 'Usage: git shiplog ls [ENV] [LIMIT]\n\nList the most recent LIMIT entries (default 20) of the ENV journal.\n'
+        return 0 ;;
+      --) shift; pos+=("$@"); break ;;
+      -*) die "shiplog: unknown ls option: $1 (see git shiplog ls --help)" ;;
+      *) pos+=("$1"); shift ;;
+    esac
+  done
+  local env="${pos[0]:-$DEFAULT_ENV}"
+  local limit="${pos[1]:-20}"
   shiplog_validate_env_name "$env"
   local ref; ref="$(ref_journal "$env")"
   [ -n "$(current_tip "$ref")" ] || die "No entries at $ref"
@@ -2676,13 +2683,30 @@ run_command() {
 cmd_validate_trailer() {
   ensure_in_repo
   need jq
-  case "${1:-}" in
-    --help|-h)
-      printf 'Usage: git shiplog validate-trailer [COMMIT|REF]\n\nValidate the JSON trailer of one entry (defaults to the latest entry of the current environment).\n'
-      return 0 ;;
-    -*) die "shiplog: unknown validate-trailer option: $1 (see git shiplog validate-trailer --help)" ;;
+  local target=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --help|-h)
+        printf 'Usage: git shiplog validate-trailer [COMMIT|REF]\n\nValidate the JSON trailer of one entry (defaults to the latest entry of the current environment).\n'
+        return 0 ;;
+      --)
+        shift
+        if [ $# -gt 0 ]; then
+          [ -z "$target" ] || die "shiplog: validate-trailer accepts a single COMMIT|REF (got '$target' and '$1')"
+          target="$1"; shift
+        fi
+        [ $# -eq 0 ] || die "shiplog: unexpected argument to validate-trailer: $1"
+        break ;;
+      -*) die "shiplog: unknown validate-trailer option: $1 (see git shiplog validate-trailer --help)" ;;
+      *)
+        [ -z "$target" ] || die "shiplog: validate-trailer accepts a single COMMIT|REF (got '$target' and '$1')"
+        target="$1"; shift ;;
+    esac
+  done
+  # A target after `--` may start with '-'; git would parse it as an option.
+  case "$target" in
+    -*) die "shiplog: invalid target '$target' (must not start with '-')" ;;
   esac
-  local target="${1:-}"
   if [ -z "$target" ]; then
     target="$(ref_journal "$DEFAULT_ENV")"
   fi

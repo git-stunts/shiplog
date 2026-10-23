@@ -367,3 +367,22 @@ line_count() {
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | jq -e '.seq' >/dev/null
 }
+
+# ---------------------------------------------------------------------------
+# `--` after the command name reaches the subcommand; read commands accept it
+# ---------------------------------------------------------------------------
+
+@test "g7b ls/validate-trailer: -- ends options and is not an unknown option" {
+  git shiplog write >/dev/null
+  git shiplog write staging >/dev/null
+  run git shiplog ls -- staging
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"staging"* ]]
+  local sha
+  sha=$(git rev-parse "${REF_ROOT}/journal/prod")
+  run git shiplog validate-trailer -- "$sha"
+  [ "$status" -eq 0 ]
+  # Positive control: the same target without -- validates too
+  run git shiplog validate-trailer "$sha"
+  [ "$status" -eq 0 ]
+}
