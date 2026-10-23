@@ -63,13 +63,11 @@ jobs:
             ci-logs/*.log
           if-no-files-found: ignore
 
-  # ROADMAP G2: adversarial trust suite. Runs only test/27_trust_adversarial.bats
-  # (selected by its `# bats file_tags=adversarial` marker). The file skips itself
-  # unless SHIPLOG_RUN_ADVERSARIAL=1, so the default suite above stays green.
-  # Allowed to fail until G3 lands the trust rewrite and flips this job to blocking.
+  # ROADMAP G2/G3: adversarial trust suite. Runs only test/27_trust_adversarial.bats
+  # (selected by its `# bats file_tags=adversarial` marker). Blocking since G3
+  # landed the trust verification rewrite (lib/trust-verify.sh).
   adversarial:
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -98,10 +96,9 @@ jobs:
             ENABLE_SIGNING=false
           cache-from: type=local,src=/tmp/.buildx-cache
 
-      - name: Run adversarial trust suite in container (allowed to fail)
+      - name: Run adversarial trust suite in container (blocking)
         run: |
           docker run --rm \
-            -e SHIPLOG_RUN_ADVERSARIAL=1 \
             -e BATS_FLAGS='--filter-tags adversarial -r' \
             -e TEST_TIMEOUT_SECS=900 \
             -v "$PWD":/workspace shiplog-tests:ci

@@ -6,9 +6,10 @@
 # payload is computed exactly the way scripts/shiplog-verify-trust.sh and the
 # hook fallback compute it:
 #
-#   shiplog-trust-tree-v1\n<base_tree_oid>\n<trust_id>\n<threshold>\n
+#   shiplog-trust-tree-v2\n<base_tree_oid>\n<trust_id>\n<threshold>\n<prior_oid>\n
 #
-# where <base_tree_oid> is the tree holding only trust.json and allowed_signers.
+# where <base_tree_oid> is the tree holding only trust.json and allowed_signers
+# and <prior_oid> is the trust commit being replaced (zero OID at genesis).
 #
 # Conventions:
 #   - Keys are named (A, B, C, K ...) and live under $ADV_KEYS_DIR/<name>/id_ed25519.
@@ -121,16 +122,16 @@ adv_base_tree() {
   printf "100644 blob %s${ADV_TAB}trust.json\n100644 blob %s${ADV_TAB}allowed_signers\n" "$1" "$2" | git mktree
 }
 
-# adv_attest_payload <base_tree> <trust_id> <threshold>
+# adv_attest_payload <base_tree> <trust_id> <threshold> [prior_oid]
 adv_attest_payload() {
-  printf 'shiplog-trust-tree-v1\n%s\n%s\n%s\n' "$1" "$2" "$3"
+  printf 'shiplog-trust-tree-v2\n%s\n%s\n%s\n%s\n' "$1" "$2" "$3" "${4:-$ADV_ZERO_OID}"
 }
 
-# adv_attest_sign <keyname> <base_tree> <trust_id> <threshold> -> signature blob oid
+# adv_attest_sign <keyname> <base_tree> <trust_id> <threshold> [prior_oid] -> signature blob oid
 adv_attest_sign() {
   local key="$1" tmp
   tmp="$(mktemp)"
-  adv_attest_payload "$2" "$3" "$4" >"$tmp"
+  adv_attest_payload "$2" "$3" "$4" "${5:-}" >"$tmp"
   if ! ssh-keygen -Y sign -q -f "$(adv_key_priv "$key")" -n shiplog-trust "$tmp" >/dev/null 2>&1; then
     rm -f "$tmp" "$tmp.sig"
     echo "ERROR: ssh-keygen -Y sign failed for key $key" >&2
@@ -182,7 +183,7 @@ adv_assert_commit_signed() {
 #                  <trust_json> <allowed_signers_text>
 # Builds the trust tree (trust.json, allowed_signers, optional
 # .shiplog/trust_sigs/<principal>.sig) and prints the commit oid.
-# --sig signs the canonical base payload with the named key.
+# --sig signs the canonical payload (prior = the -p parent, or the zero OID) with the named key.
 # --sig-blob stores an arbitrary pre-made blob under that principal's name.
 adv_trust_commit() {
   local parent="" sign_key="" msg="shiplog: trust update" email=""
@@ -215,7 +216,7 @@ adv_trust_commit() {
       if [[ "$key" =~ ^[0-9a-f]{40}$ ]] || [[ "$key" =~ ^[0-9a-f]{64}$ ]]; then
         oid="$key"
       else
-        oid=$(adv_attest_sign "$key" "$base" "$trust_id" "$threshold") || return 1
+        oid=$(adv_attest_sign "$key" "$base" "$trust_id" "$threshold" "${parent:-$ADV_ZERO_OID}") || return 1
       fi
       entries+="100644 blob ${oid}${ADV_TAB}${principal}.sig"$'\n'
     done

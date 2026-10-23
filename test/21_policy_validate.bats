@@ -70,6 +70,22 @@ JSON
   [[ "$output" == *"notes_ref"* ]]
 }
 
+@test "policy validate prints the validator errors instead of exiting silently" {
+  # SLT.BUG.TRUST.012: errexit used to abort the capture before any output.
+  mkdir -p .shiplog
+  cat > .shiplog/policy.json <<'JSON'
+{
+  "version": "1.0.0",
+  "require_signed": "yes",
+  "authors": {"default_allowlist": ["ship@example.com"]}
+}
+JSON
+  run git shiplog --boring policy validate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"require_signed"* ]]
+  [[ "$output" == *"policy validation failed"* ]]
+}
+
 @test "policy validate fails when ff_only is not boolean" {
   mkdir -p .shiplog
   cat > .shiplog/policy.json <<'JSON'

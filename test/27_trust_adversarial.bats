@@ -26,11 +26,6 @@ TESTER_EMAIL="shiplog-tester@example.com"
 HOOK_ENV_ATTEST=(SHIPLOG_REQUIRE_SIGNED_TRUST=1 SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=attestation)
 
 setup() {
-  # Red until G3 lands the trust rewrite; the default suite must stay green on main.
-  # The CI `adversarial` job (and anyone checking G3) opts in with SHIPLOG_RUN_ADVERSARIAL=1.
-  if [ "${SHIPLOG_RUN_ADVERSARIAL:-0}" != 1 ]; then
-    skip "adversarial trust suite is opt-in until G3 (set SHIPLOG_RUN_ADVERSARIAL=1)"
-  fi
   shiplog_install_cli
   shiplog_use_sandbox_repo
   export SHIPLOG_HOME="$SHIPLOG_PROJECT_ROOT"
@@ -58,7 +53,6 @@ setup() {
 }
 
 teardown() {
-  [ "${SHIPLOG_RUN_ADVERSARIAL:-0}" = 1 ] || return 0
   git remote remove "$REMOTE_NAME" >/dev/null 2>&1 || true
   if [ -n "${REMOTE_PARENT:-}" ]; then
     rm -rf "$REMOTE_PARENT"
@@ -173,6 +167,34 @@ bootstrap_server_k() {
   [ "$(adv_remote_ref "$REMOTE_DIR" "$ADV_TRUST_REF")" = "$GENESIS_AB" ]
 }
 
+@test "trust-replay: re-pushing an earlier roster with its original attestations is rejected" {
+  adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
+  # S0: roster A, B, C (threshold 2), attested by A and B.
+  trust_abc=$(adv_trust_json 2 attestation a@example.com b@example.com c@example.com)
+  signers_abc="$(adv_signers a@example.com=A b@example.com=B c@example.com=C)"
+  s0=$(adv_trust_commit -S A --sig a@example.com=A --sig b@example.com=B \
+    -m "shiplog: trust root (A+B+C)" "$trust_abc" "$signers_abc")
+  git update-ref "$ADV_TRUST_REF" "$s0"
+  adv_push_ok "$ADV_TRUST_REF"
+
+  # S1: A and B remove C (say C's key leaked).
+  trust_ab=$(adv_trust_json 2 attestation a@example.com b@example.com)
+  signers_ab="$(adv_signers a@example.com=A b@example.com=B)"
+  s1=$(adv_trust_commit -p "$s0" -S A --sig a@example.com=A --sig b@example.com=B \
+    -m "shiplog: remove C" "$trust_ab" "$signers_ab")
+  git update-ref "$ADV_TRUST_REF" "$s1" "$s0"
+  adv_push_ok "$ADV_TRUST_REF"
+
+  # Replay by A alone: a child of S1, signed by A, that copies S0's tree with its
+  # .sig files. B never approved going from S1 back to S0, so 2-of-2 is not met.
+  replay=$(adv_commit_tree "$(git rev-parse "$s0^{tree}")" "$s1" A "shiplog: restore C" a@example.com)
+  adv_assert_commit_signed "$replay"
+  git update-ref "$ADV_TRUST_REF" "$replay" "$s1"
+
+  adv_push_rejected "$ADV_TRUST_REF"
+  [ "$(adv_remote_ref "$REMOTE_DIR" "$ADV_TRUST_REF")" = "$s1" ]
+}
+
 @test "legit-rotation: A+B quorum adding maintainer C is accepted" {
   adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
   build_genesis_ab
@@ -280,6 +302,35 @@ bootstrap_server_k() {
   adv_push_ok refs/_shiplog/journal/prod
   [ "$(adv_remote_ref "$REMOTE_DIR" refs/_shiplog/journal/prod)" = "$entry" ]
   [ -z "$(adv_server_signers_config "$REMOTE_DIR")" ]
+}
+
+@test "revoked-journal-signer: an entry signed by a revoked maintainer's key is rejected even if its roster line remains" {
+  adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
+  # Roster: the tester (K) and A, with A revoked in trust.json but still listed in allowed_signers.
+  trust=$(adv_trust_json 1 attestation "$TESTER_EMAIL" a@example.com:revoked)
+  signers="$(adv_signers "$TESTER_EMAIL=K" a@example.com=A)"
+  GENESIS_K=$(adv_trust_commit -S K --sig "$TESTER_EMAIL=K" -e "$TESTER_EMAIL" \
+    -m "shiplog: trust root (A revoked)" "$trust" "$signers")
+  git update-ref "$ADV_TRUST_REF" "$GENESIS_K"
+  git shiplog trust sync >/dev/null
+  adv_push_ok "$ADV_TRUST_REF"
+  build_policy_k true
+  adv_push_ok "$ADV_POLICY_REF"
+  git shiplog init >/dev/null
+
+  # Control: an entry signed by the unrevoked tester key is accepted.
+  adv_use_signing_key K
+  export SHIPLOG_SIGN=1
+  make_entry
+  adv_push_ok refs/_shiplog/journal/prod
+  first=$(adv_remote_ref "$REMOTE_DIR" refs/_shiplog/journal/prod)
+
+  adv_use_signing_key A
+  make_entry
+  entry=$(git rev-parse refs/_shiplog/journal/prod)
+  adv_assert_commit_signed "$entry"
+  adv_push_rejected refs/_shiplog/journal/prod
+  [ "$(adv_remote_ref "$REMOTE_DIR" refs/_shiplog/journal/prod)" = "$first" ]
 }
 
 @test "roster-swap: a signed entry is rejected after the roster drops the signing key" {
