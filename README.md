@@ -193,7 +193,7 @@ Either way the ledger is the same bytes. Only the bouncer changes. The full matr
 
 | Command | What it does |
 |---|---|
-| `git shiplog init` | Add fetch and push refspecs for the ref root to your remote and enable reflogs; nothing is pushed, but a plain `git push` now sends Shiplog refs too ([#140](https://github.com/git-stunts/shiplog/issues/140)) |
+| `git shiplog init` | Add a non-forced fetch refspec for the ref root and enable reflogs. No push refspecs: a plain `git push` is unchanged, and Shiplog publishes its own refs ([#140](https://github.com/git-stunts/shiplog/issues/140)) |
 | `git shiplog run --service S [-- cmd…]` | Run a command; record outcome, timing and log |
 | `git shiplog write [ENV]` | Record an entry by hand |
 | `git shiplog append --service S --status S --json '{…}'` | Append an entry without prompts; `--json` adds your own fields beside the core trailer |

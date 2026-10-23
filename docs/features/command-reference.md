@@ -31,9 +31,9 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
   - Usage: `git shiplog version`
 
 - `init`
-  - Purpose: configure refspecs for `refs/_shiplog/*` and enable `core.logAllRefUpdates`.
-  - Usage: `git shiplog init`
-  - Notes: idempotent; adds safe `push=HEAD` only if none present.
+  - Purpose: add a non-forced fetch refspec for the ref root and enable `core.logAllRefUpdates`.
+  - Usage: `git shiplog init [--push-refspecs]`
+  - Notes: idempotent; installs no push refspecs by default and removes the ones older versions wrote (#140); `--push-refspecs` opts in with a warning.
 
 - `write [ENV]`
   - Purpose: append a new entry to `refs/_shiplog/journal/<env>`.

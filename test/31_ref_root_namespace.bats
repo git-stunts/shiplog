@@ -138,7 +138,10 @@ teardown() {
   run git shiplog init
   [ "$status" -eq 0 ]
   run git config --get-all remote.origin.fetch
-  [[ "$output" == *"+$BRANCH_ROOT/*:$BRANCH_ROOT/*"* ]]
+  printf '%s\n' "$output" | grep -Fxq "$BRANCH_ROOT/*:$BRANCH_ROOT/*"
+  if printf '%s\n' "$output" | grep -Fxq "+$BRANCH_ROOT/*:$BRANCH_ROOT/*"; then false; fi
+  run git config --get-all remote.origin.push
+  [ -z "$output" ]
 
   run git shiplog setup --strictness balanced --authors "$TESTER_EMAIL"
   echo "setup: $output" >&2
