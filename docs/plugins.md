@@ -39,7 +39,7 @@ The trailer check runs after every plugin, so a broken plugin is named and no co
 Example scrubber:
 
 > [!WARNING]
->  This is a trivial example. Real secret detection requires comprehensive patterns for AWS keys, GitHub tokens, API keys, etc.
+> This is a trivial example. Real secret detection requires comprehensive patterns for AWS keys, GitHub tokens, API keys, etc.
 
 ```bash
 #!/usr/bin/env bash
