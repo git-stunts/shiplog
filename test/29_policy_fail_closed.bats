@@ -173,3 +173,29 @@ drop_signers() {
   [ "$status" -eq 0 ]
   [ "$(jq -r .require_signed .shiplog/policy.json)" = "false" ]
 }
+
+@test "SLT.BUG.LIB.010: an empty or multi-value policy document stops policy show and write" {
+  # Positive control: a single valid document loads.
+  printf '{"version":"1.0.0","require_signed":false}\n' > .shiplog/policy.json
+  run git shiplog policy show --boring
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Source: policy-file:.shiplog/policy.json"* ]]
+
+  local doc
+  for doc in '' '   ' $'{"version":"1.0.0","require_signed":false}\n{"version":"1.0.0","require_signed":true}'; do
+    printf '%s' "$doc" > .shiplog/policy.json
+    run git shiplog policy show --boring
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly one JSON value"* ]]
+    run env SHIPLOG_SIGN=0 git shiplog --boring --yes write
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly one JSON value"* ]]
+    run git show-ref refs/_shiplog/journal/prod
+    [ "$status" -ne 0 ]
+    run "$SHIPLOG_PROJECT_ROOT"/scripts/policy/validate.sh .shiplog/policy.json
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"exactly one JSON value"* ]]
+    run git shiplog --boring policy validate
+    [ "$status" -ne 0 ]
+  done
+}

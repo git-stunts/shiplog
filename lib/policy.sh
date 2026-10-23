@@ -120,6 +120,16 @@ shiplog_policy_validate_file() {
   local filter
   filter=$(shiplog_policy_validator_filter) || die "shiplog: policy validator filter not found (expected \$SHIPLOG_HOME/scripts/lib/policy_validate.jq)"
   local errs status=0
+  # Exactly one JSON value: an empty file would otherwise validate (jq runs the
+  # filter zero times) and load as the defaults, and with several values each
+  # reader would pick a different one.
+  errs=$(jq -n '[inputs] | length' "$src" 2>&1) || status=$?
+  if [ "$status" -ne 0 ]; then
+    die "shiplog: policy document ($label) is not valid JSON: ${errs:-jq exited with status $status}"
+  fi
+  if [ "$errs" != 1 ]; then
+    die "shiplog: policy document ($label) must contain exactly one JSON value (found $errs)"
+  fi
   errs=$(jq -r -f "$filter" "$src" 2>&1) || status=$?
   if [ "$status" -ne 0 ]; then
     die "shiplog: policy document ($label) is not valid JSON: ${errs:-jq exited with status $status}"

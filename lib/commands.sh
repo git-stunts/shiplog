@@ -1375,6 +1375,9 @@ EOF
       if ! printf '%s\n' "$raw_policy" | jq . >/dev/null 2>&1; then
         die "shiplog: policy JSON is not parseable ($label)"
       fi
+      local value_count
+      value_count=$(printf '%s\n' "$raw_policy" | jq -n '[inputs] | length')
+      [ "$value_count" = 1 ] || die "shiplog: policy document ($label) must contain exactly one JSON value (found $value_count)"
 
       # Structural checks (jq-only; AJV lives in CI). scripts/lib/policy_validate.jq is canonical.
       local errs=""
