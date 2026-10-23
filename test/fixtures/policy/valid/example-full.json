@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "schema": "https://raw.githubusercontent.com/flyingrobots/shiplog/main/examples/policy.schema.json",
+  "format_compat": ">=1.0.0 <2.0.0",
+  "require_signed": true,
+  "allow_ssh_signers_file": ".shiplog/allowed_signers",
+  "authors": {
+    "default_allowlist": [
+      "deploy-bot@example.com",
+      "engineering@example.com"
+    ],
+    "env_overrides": {
+      "prod": [
+        "prod-approver@example.com"
+      ]
+    }
+  },
+  "deployment_requirements": {
+    "prod": {
+      "require_ticket": true,
+      "require_service": true,
+      "require_where": ["region", "cluster", "namespace"]
+    },
+    "default": {
+      "require_ticket": true
+    }
+  },
+  "ff_only": true,
+  "notes_ref": "refs/_shiplog/notes/logs"
+}

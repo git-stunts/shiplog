@@ -29,6 +29,9 @@ RUN case "$DISTRO_FAMILY" in \
 RUN git config --system init.defaultBranch main || true
 
 ARG MATRIX_NAME=unknown
+# Build ARGs are not visible at container runtime; promote to ENV so the log
+# header names the distro (#147).
+ENV MATRIX_NAME=$MATRIX_NAME
 COPY --link <<'SCRIPT' /usr/local/bin/run-tests
 #!/usr/bin/env bash
 set -euo pipefail

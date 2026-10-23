@@ -1,5 +1,5 @@
 {
-  "id": "SLT.ALPHA.025",
+  "id": "SLT.ALPHA.032",
   "labels": ["docs", "diagram", "trust"],
   "milestone": "Alpha",
   "name": "Docs: Trust modes diagram (chain vs attestation)",

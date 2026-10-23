@@ -75,7 +75,38 @@ This document captures the layout of the JSON trailer that `git shiplog` writes 
 - `trust_oid` — SHA of the trust ref commit used while writing.
 - `previous_anchor` — SHA of the anchor ref before the write (for anchor workflows).
 - `run` — Present when `git shiplog run` populates structured command metadata (see below).
-- Any additional objects merged via `SHIPLOG_EXTRA_JSON` (e.g., from `git shiplog append`) are placed at the top level alongside these keys.
+- Any additional objects merged via `SHIPLOG_EXTRA_JSON` (e.g., from `git shiplog append --json`) are placed at the top level alongside these keys. They may not use a reserved key (next section).
+
+### Reserved Keys and Extras
+
+The writer owns these top-level keys:
+
+```text
+version env ts who what where why how status when seq journal_parent trust_oid previous_anchor repo_head run commit notes
+```
+
+`commit` and `notes` are reserved because `git shiplog export-json` adds them at read time (`notes` is `{ref, attached}`). The list lives in `SHIPLOG_RESERVED_TRAILER_KEYS` (`lib/git.sh`); update both places together.
+
+Rules for extra data (`git shiplog append --json`, `--json-file`, stdin, or the internal `SHIPLOG_EXTRA_JSON`):
+
+- The payload must be a JSON object.
+- A payload that names a reserved key is rejected before anything is written, with a message naming the key, for example `shiplog: --json payload may not set reserved trailer key "seq"`.
+- Extras are merged as `$extra + .` (core wins), so even a payload that slipped past the check could not replace a core value. Nest custom data under your own key, e.g. `{"custom": {"build": "200"}}`.
+
+### Message Layout and the Trailer Sentinel
+
+A journal commit message is a human header, one sentinel line, then the JSON object:
+
+```text
+Deploy: api ghcr.io/example/api:1 → prod
+Reason: hotfix 503s (OPS-1)
+...
+
+---  # structured trailer for machines
+{ ...json... }
+```
+
+Readers (`show --json`, `ls`, `validate-trailer`, the pre-receive hook) take the **last** sentinel line, so header text can never shift the parse. Header fields are single-line: `write` turns newlines in `reason`, `service`, `ticket`, `region`, `cluster`, `namespace`, `image`, `tag` and `run_url` into spaces before composing the message. Entries without a sentinel (hand-built or legacy) are read from their last bare `---` line.
 
 ### `run` Object
 
@@ -86,7 +117,7 @@ The `run` block appears when the entry was produced by `git shiplog run`. Its sh
 | `argv` | array[string] | Original argument vector passed to the wrapped command. |
 | `cmd` | string | Shell-quoted command string for human readability. |
 | `exit_code` | integer | Exit status of the wrapped command. |
-| `status` | string | Final status (`success` or `failed` as recorded in the trailer; CLI flags map to these values). |
+| `status` | string | Status recorded for the run: `--status-success` (default `success`) when the command exits 0, else `--status-failure` (default `failed`). Both must be values of the top-level `status` enum and are checked before the command runs. |
 | `duration_s` | integer | Execution duration in seconds. |
 | `started_at` | string | UTC timestamp when execution began. |
 | `finished_at` | string | UTC timestamp when execution completed. |
@@ -175,7 +206,7 @@ The `run` block appears when the entry was produced by `git shiplog run`. Its sh
         "exit_code": {"type": "integer"},
         "status": {
           "type": "string",
-          "enum": ["success", "failed"]
+          "enum": ["success", "failed", "in_progress", "skipped", "override", "revert", "finalize"]
         },
         "duration_s": {"type": "integer"},
         "started_at": {"type": "string", "format": "date-time"},
@@ -194,4 +225,4 @@ The `run` block appears when the entry was produced by `git shiplog run`. Its sh
 - `git shiplog run`
 - `git shiplog append`
 
-These commands all use the same base schema. `run` populates the `run` object automatically, while `append` merges arbitrary JSON via `SHIPLOG_EXTRA_JSON`.
+These commands all use the same base schema. `run` populates the `run` object automatically (through the internal `SHIPLOG_RUN_JSON` channel, which extras cannot override), while `append` merges arbitrary JSON via `SHIPLOG_EXTRA_JSON` subject to the reserved-key rule above.

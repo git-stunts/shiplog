@@ -16,14 +16,31 @@ changed() {
 mapfile -d '' files < <(changed)
 [ ${#files[@]} -gt 0 ] || exit 0
 
+# A staged file is shell if its first line is a bash/sh shebang; this covers
+# extensionless scripts such as scripts/bosun (#146).
+has_shell_shebang() {
+  local first
+  first=$(head -n 1 -- "$1" 2>/dev/null || true)
+  case "$first" in
+    '#!'*bash*|'#!'*/sh|'#!'*/sh\ *|'#!'*' sh'|'#!'*' sh '*) return 0 ;;
+  esac
+  return 1
+}
+
 sh_files=()
 md_files=()
 yml_files=()
 for f in "${files[@]}"; do
   case "$f" in
-    bin/git-shiplog|contrib/hooks/*|*.sh) sh_files+=("$f") ;;
+    bin/git-shiplog|contrib/hooks/*|scripts/bosun|scripts/dev/*.sh|*.sh|*.bash) sh_files+=("$f") ;;
     *.md) md_files+=("$f") ;;
     *.yml|*.yaml) yml_files+=("$f") ;;
+    *.bats|Dockerfile|*/Dockerfile) ;;
+    *)
+      if [ -f "$f" ] && has_shell_shebang "$f"; then
+        sh_files+=("$f")
+      fi
+      ;;
   esac
 done
 

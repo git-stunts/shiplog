@@ -1,5 +1,5 @@
 {
-  "id": "SLT.ALPHA.024",
+  "id": "SLT.ALPHA.031",
   "labels": ["docs", "tutorial", "onboarding"],
   "milestone": "Alpha",
   "name": "Docs: First 10 minutes with Shiplog",

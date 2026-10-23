@@ -16,8 +16,10 @@ export PATH="$SHIPLOG_HOME/bin:$PATH"
 # Avoid network during tests by default; use local sandbox init
 export SHIPLOG_USE_LOCAL_SANDBOX="${SHIPLOG_USE_LOCAL_SANDBOX:-1}"
 
-# Enforce a timeout for the Bats test run (set TEST_TIMEOUT_SECS=0 to disable)
-TEST_TIMEOUT_SECS="${TEST_TIMEOUT_SECS:-180}"
+# Optional timeout for the Bats test run. The default is no timeout, the same
+# rule as the Dockerfile entrypoint and `make test` (#132); set
+# TEST_TIMEOUT_SECS to a positive integer to opt in.
+TEST_TIMEOUT_SECS="${TEST_TIMEOUT_SECS:-}"
 
 use_timeout() {
   local val="$1"
@@ -44,8 +46,10 @@ if ! command -v bats >/dev/null 2>&1; then
 fi
 
 timeout_enabled=0
-use_timeout "$TEST_TIMEOUT_SECS"
-timeout_status=$?
+# use_timeout returns 1 for "no timeout" (the default); capture that without
+# tripping errexit.
+timeout_status=0
+use_timeout "$TEST_TIMEOUT_SECS" || timeout_status=$?
 case "$timeout_status" in
   0) timeout_enabled=1 ;;
   1) timeout_enabled=0 ;;

@@ -1,0 +1,87 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Cross-link hosting matrix from docs/hosting/github.md and add a brief Git hosts section in README"
+    },
+    {
+      "owner": "assistant",
+      "task": "Rewrite README after reviewing AGENTS.md, current README, and all docs (clarify live features vs roadmap)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Add test that enforces SHIPLOG_REQUIRE_SIGNED_TRUST=1 behavior (unsigned trust push fails, signed passes)"
+    }
+  ],
+  "date": "2025-10-04",
+  "key_decisions": [
+    "Make trust-commit signature optional by default; gate with SHIPLOG_REQUIRE_SIGNED_TRUST",
+    "Keep run confirmation minimal (emoji), configurable via SHIPLOG_CONFIRM_TEXT",
+    "Respect repo config shiplog.autoPush and add explicit publish command",
+    "Normalize task-progress generator format to avoid CI whitespace diffs"
+  ],
+  "summary": "Landed trust verification (sig_mode), UX polish, auto-push/publish controls, fixed CI regressions, added linters and opened hosting matrix doc PR.",
+  "time": "05:45",
+  "topics": [
+    {
+      "context": "Hook started requiring signed trust commits which broke tests 27/28/34/44",
+      "future_work": "Add tests for signed-trust gate on and refine messages",
+      "issue": "Unsigned trust commits rejected by default and unbound var in hook",
+      "resolution": "Made trust-commit signing opt-in via SHIPLOG_REQUIRE_SIGNED_TRUST; fixed nounset and case",
+      "time_percent": 25,
+      "topic": "Trust verification + sig_mode",
+      "what": "Added chain/attestation modes and shared verifier; gated trust-commit signature by env",
+      "why": "Enable quorum enforcement and restore tests expecting unsigned trust commit"
+    },
+    {
+      "context": "Original preview was verbose and '?' placeholders looked broken",
+      "future_work": "Optional compact ls mode that hides empty columns",
+      "issue": "Too chatty run output; confusing placeholders",
+      "resolution": "Stream output; emoji-only confirmation; ls pulls JSON and uses '-'",
+      "time_percent": 15,
+      "topic": "Run UX + output",
+      "what": "Minimal confirmation (🪵) and hidden optional fields in headers/ls",
+      "why": "Reduce noise and improve readability for small teams"
+    },
+    {
+      "context": "Deploys disrupted by hooks; desire to push at end",
+      "future_work": "Consider flipping default in a future minor with deprecation note",
+      "issue": "Auto-push always on unless env flag",
+      "resolution": "Precedence flags>config>env; new publish command",
+      "time_percent": 10,
+      "topic": "Auto-push + publish",
+      "what": "Respected git config shiplog.autoPush and added git shiplog publish",
+      "why": "Avoid triggering pre-push hooks mid-deploy; explicit finalize step"
+    },
+    {
+      "context": "Hook enforced trust signing; generator vs file whitespace mismatch",
+      "future_work": "Lock generator format and lint only non-generated sections",
+      "issue": "Unbound var, signature gate, and blank line under 'Overall'",
+      "resolution": "Gate trust signing; restore dry-run preview; update generator to stable format",
+      "time_percent": 25,
+      "topic": "CI/CD fixes",
+      "what": "Repaired failing bats (trust push, run --dry-run) and task-progress whitespace diff",
+      "why": "Matrix CI was red on Alpine and task-progress job"
+    },
+    {
+      "context": "CodeRabbit flagged markdown and shell issues",
+      "future_work": "Flip to blocking once baseline is clean",
+      "issue": "Early failures would block iterative work",
+      "resolution": "continue-on-error/|| true initially; plan to tighten later",
+      "time_percent": 10,
+      "topic": "Linters & workflows",
+      "what": "Added shellcheck, markdownlint-cli2, yamllint workflow (initially non-blocking)",
+      "why": "Keep quality high without blocking existing PRs"
+    },
+    {
+      "context": "User asked for guidance and cross-linking",
+      "future_work": "Add README section and cross-links next session",
+      "issue": "No single page summarizing host capabilities",
+      "resolution": "Created matrix page PR; will cross-link in README and github.md",
+      "time_percent": 15,
+      "topic": "Hosting matrix docs & PR mgmt",
+      "what": "Opened docs/hosting/matrix.md and cross-link plan",
+      "why": "Provide prescriptive SaaS vs self-hosted guidance"
+    }
+  ]
+}

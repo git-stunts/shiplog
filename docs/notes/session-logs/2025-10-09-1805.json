@@ -1,0 +1,58 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Share canonical path helpers between hooks and CLI"
+    },
+    {
+      "owner": "assistant",
+      "task": "Document weighted progress math in docs/tasks/README.md or CONTRIBUTING"
+    }
+  ],
+  "date": "2025-10-09",
+  "key_decisions": [
+    "Canonical hook validators accept only SHIPLOG_HOME-rooted paths and fail closed on unknown perms",
+    "require_where enforcement now mirrors docs list (region/cluster/namespace/service/environment)",
+    "Progress automation reports weighted points explicitly and regenerates docs/tasks/README.md"
+  ],
+  "summary": "Hardened policy validator plumbing, restored require_where enforcement, and fixed weighted progress reporting while extending regression coverage.",
+  "time": "18:05",
+  "topics": [
+    {
+      "context": "Review flagged unsafe overrides and missing rationale",
+      "future_work": "Consider sharing canonicalization helpers across hooks",
+      "issue": "Override paths could slip outside SHIPLOG_HOME and group/world-writable files were not clearly handled",
+      "resolution": "Hook now canonicalizes under SHIPLOG_HOME, logs rejections, explains multi-tool chmod fallback, and treats unknown perms as unsafe",
+      "topic": "Validator security",
+      "what": "Expanded SAFE_PREFIXES, added chmod/writability fallbacks, documented hook security model",
+      "why": "Pre-receive hook must fail closed and document trust boundaries"
+    },
+    {
+      "context": "AJV caught numeric version issue; CLI fallback silently ignored filter failures",
+      "future_work": "Add schema-driven allowlist for future fields",
+      "issue": "require_where accepted unsupported values and CLI dropped validator stderr",
+      "resolution": "Canonical jq now enforces unique allowed strings, CLI returns validator exit codes with stderr so jq syntax issues are visible",
+      "topic": "Policy filter consistency",
+      "what": "Restored require_where allowed-value checks and surfaced validator stderr",
+      "why": "Keep CLI/script/hook validation aligned and debuggable"
+    },
+    {
+      "context": "docs/tasks/README.md mislabeled counts as weighted",
+      "future_work": "Consider exposing fractional weighted percentages per milestone",
+      "issue": "Rendered counts flashed 64/76 while claiming weighted",
+      "resolution": "Generator now prints weighted points plus task counts and README regenerated via make progress",
+      "topic": "Roadmap telemetry",
+      "what": "Updated progress generator to emit weighted counts plus raw task totals",
+      "why": "Docs overstated weight handling causing review feedback"
+    },
+    {
+      "context": "New jq checks required matching tests",
+      "future_work": "Add hook-focused shunit harness for validator path safety",
+      "issue": "Tests reran validators twice without explanation",
+      "resolution": "Added helper comment, new unsupported-value case, and ensured both entry points stay covered",
+      "topic": "Regression coverage",
+      "what": "Extended policy_validate tests for invalid JSON, allowed-value enforcement, and documented dual validation path",
+      "why": "Prevent future drift between CLI and script validators"
+    }
+  ]
+}

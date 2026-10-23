@@ -10,8 +10,151 @@ else
   exit 1
 fi
 
+# -------- Ref root --------
+# Every Shiplog ref hangs off one root. The root is resolved once per process
+# (SHIPLOG_REF_ROOT env > git config shiplog.refRoot > refs/_shiplog) and the
+# policy, trust, notes, journal and anchors refs are derived from it unless an
+# explicit SHIPLOG_POLICY_REF / SHIPLOG_TRUST_REF / SHIPLOG_NOTES_REF is set.
+SHIPLOG_REF_ROOT_DEFAULT="refs/_shiplog"
+
+# shiplog_normalize_ref_root ROOT
+# Prints the normalized root (trailing slashes stripped) or returns 1 when ROOT
+# is not a usable ref prefix: it must start with "refs/" and pass
+# git check-ref-format.
+shiplog_normalize_ref_root() {
+  local root="${1:-}"
+  while [ -n "$root" ] && [ "$root" != "${root%/}" ]; do
+    root="${root%/}"
+  done
+  case "$root" in
+    refs/?*) ;;
+    *) return 1 ;;
+  esac
+  git check-ref-format --allow-onelevel "$root/x" >/dev/null 2>&1 || return 1
+  printf '%s' "$root"
+}
+
+# shiplog_resolve_ref_root
+# Sets REF_ROOT and REF_ROOT_SOURCE (env|config|default). Dies on an invalid
+# root so a typo in SHIPLOG_REF_ROOT or shiplog.refRoot cannot scatter refs.
+shiplog_resolve_ref_root() {
+  local raw="" source=""
+  if [ -n "${SHIPLOG_REF_ROOT:-}" ]; then
+    raw="$SHIPLOG_REF_ROOT"
+    source="env"
+  else
+    raw=$(git config --get shiplog.refRoot 2>/dev/null || true)
+    if [ -n "$raw" ]; then
+      source="config"
+    else
+      raw="$SHIPLOG_REF_ROOT_DEFAULT"
+      source="default"
+    fi
+  fi
+  local normalized
+  if ! normalized=$(shiplog_normalize_ref_root "$raw"); then
+    local where
+    case "$source" in
+      env) where="SHIPLOG_REF_ROOT" ;;
+      config) where="git config shiplog.refRoot" ;;
+      *) where="built-in default" ;;
+    esac
+    die "shiplog: invalid ref root '$raw' from $where (expected refs/<name>, e.g. refs/_shiplog or refs/heads/_shiplog)"
+  fi
+  REF_ROOT="$normalized"
+  REF_ROOT_SOURCE="$source"
+}
+
 ref_journal() { echo "$REF_ROOT/journal/$1"; }
 ref_anchor()  { echo "$REF_ROOT/anchors/$1"; }
+
+# shiplog_raw_policy_json
+# Prints the raw policy document (policy ref first, then the working-tree
+# file) without resolving it and without requiring a signers file.
+shiplog_raw_policy_json() {
+  local raw=""
+  local policy_ref="${POLICY_REF:-${POLICY_REF_DEFAULT:-$REF_ROOT/policy/current}}"
+  if git rev-parse -q --verify "$policy_ref" >/dev/null 2>&1; then
+    raw=$(git show "$policy_ref:.shiplog/policy.json" 2>/dev/null || true)
+  fi
+  if [ -z "$raw" ]; then
+    local top
+    top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    if [ -n "$top" ] && [ -f "$top/.shiplog/policy.json" ]; then
+      raw=$(cat "$top/.shiplog/policy.json" 2>/dev/null || true)
+    fi
+  fi
+  printf '%s' "$raw"
+}
+
+# shiplog_notes_ref
+# Prints the effective notes ref: SHIPLOG_NOTES_REF > policy `notes_ref` >
+# <ref root>/notes/logs (the same precedence as shiplog_policy_load). Every command that reads, attaches or pushes notes
+# (write, show, export-json, publish) uses this so attached logs stay visible
+# and get published (#123). Cached per process.
+SHIPLOG_NOTES_REF_EFFECTIVE=""
+shiplog_notes_ref() {
+  if [ -n "$SHIPLOG_NOTES_REF_EFFECTIVE" ]; then
+    printf '%s' "$SHIPLOG_NOTES_REF_EFFECTIVE"
+    return 0
+  fi
+  local result="" raw policy_notes=""
+  if [ -z "${SHIPLOG_NOTES_REF:-}" ] && git rev-parse --git-dir >/dev/null 2>&1; then
+    raw=$(shiplog_raw_policy_json)
+    if [ -n "$raw" ] && command -v jq >/dev/null 2>&1; then
+      policy_notes=$(printf '%s\n' "$raw" | jq -r '.notes_ref // empty' 2>/dev/null || true)
+    fi
+  fi
+  if [ -n "${SHIPLOG_NOTES_REF:-}" ]; then
+    result="$SHIPLOG_NOTES_REF"
+  elif [ -n "$policy_notes" ]; then
+    result="$policy_notes"
+  else
+    result="${NOTES_REF_DEFAULT:-$REF_ROOT/notes/logs}"
+  fi
+  SHIPLOG_NOTES_REF_EFFECTIVE="$result"
+  printf '%s' "$result"
+}
+
+# shiplog_ensure_notes_alias NOTES_REF
+# `git notes --ref=X` operates on refs/notes/X unless X already starts with
+# refs/notes/. Shiplog keeps notes under the ref root so they are published and
+# protected together with the journals, so refs/notes/X is made a symbolic ref
+# to X: every `git notes --ref=X` call (ours, scripts, users) then reads and
+# writes the real ref. Notes previously written at the legacy location
+# refs/notes/X are adopted into X the first time this runs.
+shiplog_ensure_notes_alias() {
+  local notes_ref="$1"
+  [ -n "$notes_ref" ] || return 0
+  case "$notes_ref" in
+    refs/notes/*) return 0 ;;
+  esac
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  local alias="refs/notes/$notes_ref"
+  local current legacy
+  if current=$(git symbolic-ref -q "$alias" 2>/dev/null); then
+    [ "$current" = "$notes_ref" ] && return 0
+  elif legacy=$(git rev-parse -q --verify "$alias^{commit}" 2>/dev/null); then
+    if ! git rev-parse -q --verify "$notes_ref" >/dev/null 2>&1; then
+      git update-ref "$notes_ref" "$legacy" || return 0
+    elif [ "$(git rev-parse "$notes_ref")" != "$legacy" ]; then
+      printf '⚠️ shiplog: notes at legacy location %s (%s) differ from %s; keeping %s (the legacy commit stays reachable via your reflog)\n' \
+        "$alias" "$legacy" "$notes_ref" "$notes_ref" >&2
+    fi
+    git update-ref -d "$alias" "$legacy" || return 0
+  fi
+  git symbolic-ref "$alias" "$notes_ref" 2>/dev/null || true
+}
+
+# shiplog_notes_git_ref
+# The value to pass to `git notes --ref=`: the effective notes ref, with its
+# refs/notes/ alias in place so git touches the real ref.
+shiplog_notes_git_ref() {
+  local notes_ref
+  notes_ref=$(shiplog_notes_ref)
+  shiplog_ensure_notes_alias "$notes_ref"
+  printf '%s' "$notes_ref"
+}
 
 empty_tree()  { git hash-object -t tree /dev/null; }
 
@@ -26,9 +169,93 @@ ff_update() {
   git update-ref -m "$msg" "$ref" "$new" "${old:-0000000000000000000000000000000000000000}"
 }
 
+# -------- Structured trailer --------
+# A journal entry is a human header, one sentinel line, then a JSON object.
+# The writer emits exactly SHIPLOG_TRAILER_SENTINEL; every reader takes the
+# LAST sentinel line, so user text in the header can never move the parse
+# (SLT.BUG.CLI.001). Entries without a sentinel (hand-built or legacy) fall
+# back to the last bare `---` line. The hook (contrib/hooks/pre-receive.shiplog
+# read_commit_json) applies the same rule; keep them in sync.
+SHIPLOG_TRAILER_SENTINEL='---  # structured trailer for machines'
+
+# Documented status enum (docs/reference/json-schema.md). cmd_write validates
+# against this list; validate-trailer checks the same values.
+SHIPLOG_STATUS_VALUES="success failed in_progress skipped override revert finalize"
+
+# Top-level trailer keys the writer owns. SHIPLOG_EXTRA_JSON / `append --json`
+# may not set any of them (SLT.BUG.CLI.010); see docs/reference/json-schema.md.
+# `commit` and `notes` are reserved because export-json adds them at read time.
+SHIPLOG_RESERVED_TRAILER_KEYS="version env ts who what where why how status when seq journal_parent trust_oid previous_anchor repo_head run commit notes"
+
+# shiplog_extract_trailer < message
+# Prints the JSON trailer of a commit message read from stdin (nothing when no
+# separator is present).
+shiplog_extract_trailer() {
+  awk -v sentinel="$SHIPLOG_TRAILER_SENTINEL" '
+    { line[NR] = $0 }
+    $0 == sentinel { exact = NR }
+    /^---/ { bare = NR }
+    END {
+      sep = exact ? exact : bare
+      if (!sep) exit
+      for (i = sep + 1; i <= NR; i++) print line[i]
+    }'
+}
+
+# shiplog_extract_header < message
+# Prints the human header: everything before the separator that
+# shiplog_extract_trailer would pick (the whole message when there is none).
+shiplog_extract_header() {
+  awk -v sentinel="$SHIPLOG_TRAILER_SENTINEL" '
+    { line[NR] = $0 }
+    $0 == sentinel { exact = NR }
+    /^---/ { bare = NR }
+    END {
+      sep = exact ? exact : bare
+      if (!sep) sep = NR + 1
+      for (i = 1; i < sep; i++) print line[i]
+    }'
+}
+
 read_trailer_json() {
   local commit="$1"
-  git show -s --format=%B "$commit" | awk '/^---/{flag=1;next}flag'
+  git show -s --format=%B "$commit" | shiplog_extract_trailer
+}
+
+# shiplog_single_line VALUE
+# Header fields are one line each. Carriage returns are dropped and newlines
+# become a single space, so no field can start a new header line and no header
+# line can ever look like the trailer separator.
+shiplog_single_line() {
+  printf '%s' "$1" | tr -d '\r' | tr '\n' ' '
+}
+
+# shiplog_status_is_valid STATUS
+shiplog_status_is_valid() {
+  local candidate="$1" value
+  for value in $SHIPLOG_STATUS_VALUES; do
+    [ "$value" = "$candidate" ] && return 0
+  done
+  return 1
+}
+
+# shiplog_extra_json_check JSON [SOURCE]
+# An extra-JSON payload must be an object and must not carry a reserved
+# top-level key. Dies naming the offending key.
+shiplog_extra_json_check() {
+  local payload="$1" source="${2:-SHIPLOG_EXTRA_JSON}"
+  need jq
+  if ! printf '%s\n' "$payload" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    die "shiplog: $source must be a JSON object"
+  fi
+  local reserved_json clash
+  # shellcheck disable=SC2086 # word-splitting the key list is intended
+  reserved_json=$(printf '%s\n' $SHIPLOG_RESERVED_TRAILER_KEYS | jq -R . | jq -sc .)
+  clash=$(printf '%s\n' "$payload" | jq -r --argjson reserved "$reserved_json" \
+    '[keys[] | select(. as $k | $reserved | index($k) != null)] | first // empty')
+  if [ -n "$clash" ]; then
+    die "shiplog: $source may not set reserved trailer key \"$clash\" (reserved keys: $SHIPLOG_RESERVED_TRAILER_KEYS)"
+  fi
 }
 
 trailer_value() {
@@ -139,9 +366,23 @@ JQ
     --argjson seq "$seq" \
     "$jq_filter")
 
+  # `run` metadata is a core key that cmd_run supplies through SHIPLOG_RUN_JSON
+  # (internal). It is attached before extras, so extras can never replace it.
+  if [ -n "${SHIPLOG_RUN_JSON:-}" ]; then
+    local run_merged
+    if ! run_merged=$(printf '%s\n' "$json" | jq --argjson run "${SHIPLOG_RUN_JSON}" '.run = $run' 2>/dev/null); then
+      die "shiplog: SHIPLOG_RUN_JSON must be a valid JSON object"
+    fi
+    json="$run_merged"
+  fi
+
+  # Extras (append --json / SHIPLOG_EXTRA_JSON) sit beside the core keys. A
+  # payload naming a reserved key is rejected, and the merge is `$extra + .`
+  # so the core trailer wins even if that check were ever bypassed.
   if [ -n "${SHIPLOG_EXTRA_JSON:-}" ]; then
+    shiplog_extra_json_check "${SHIPLOG_EXTRA_JSON}" "SHIPLOG_EXTRA_JSON"
     local extra_merged
-    if ! extra_merged=$(printf '%s\n' "$json" | jq -S --argjson extra "${SHIPLOG_EXTRA_JSON}" '. + $extra' 2>/dev/null); then
+    if ! extra_merged=$(printf '%s\n' "$json" | jq -S --argjson extra "${SHIPLOG_EXTRA_JSON}" '$extra + .' 2>/dev/null); then
       die "shiplog: SHIPLOG_EXTRA_JSON must be valid JSON object"
     fi
     json="$extra_merged"
@@ -170,17 +411,21 @@ Seq:    $seq (parent $parent_short, trust $trust_short, anchor $anchor_short)
 Author: ${author_email:-unknown}
 Repo:   ${repo_head}
 
----  # structured trailer for machines
+$SHIPLOG_TRAILER_SENTINEL
 $json
 EOF
 }
 
 sign_commit() {
   local tree="$1"; shift
-  resolve_policy
+  shiplog_policy_assert_loaded
   local sign_mode="${SHIPLOG_SIGN_EFFECTIVE:-0}"
-  GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-${SHIPLOG_AUTHOR_NAME:-$(git config user.name || echo 'Shiplog Bot')}}"
-  GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-${SHIPLOG_AUTHOR_EMAIL:-$(git config user.email || echo 'shiplog-bot@local')}}"
+  # One identity everywhere: the email the allowlist precheck and the trailer's
+  # who.email used becomes both the author and the committer of the entry
+  # (SLT.BUG.LIB.012). The hook and `verify` read %ae.
+  local author_name author_email
+  author_name="${GIT_AUTHOR_NAME:-${SHIPLOG_AUTHOR_NAME:-$(git config user.name || echo 'Shiplog Bot')}}"
+  author_email="${GIT_AUTHOR_EMAIL:-${SHIPLOG_AUTHOR_EMAIL:-$(git config user.email || echo 'shiplog-bot@local')}}"
 
   # Build commit-tree command safely without expanding an empty array under set -u
   local -a cmd
@@ -193,7 +438,8 @@ sign_commit() {
   if [ "$#" -gt 0 ]; then
     cmd+=("$@")
   fi
-  GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL" \
+  GIT_AUTHOR_NAME="$author_name" GIT_AUTHOR_EMAIL="$author_email" \
+  GIT_COMMITTER_NAME="$author_name" GIT_COMMITTER_EMAIL="$author_email" \
     "${cmd[@]}"
 }
 
@@ -204,12 +450,22 @@ attach_note_if_present() {
     shiplog_dry_run_notice "Would attach note to $commit"
     return 0
   fi
-  git notes --ref="$NOTES_REF" add -F "$log_path" "$commit"
+  # The refs/notes alias dangles until the first note creates the real ref;
+  # git prints a one-time "ignoring dangling symref" warning for it. Keep every
+  # other diagnostic.
+  local notes_output
+  if ! notes_output=$(git notes --ref="$(shiplog_notes_git_ref)" add -F "$log_path" "$commit" 2>&1); then
+    [ -n "$notes_output" ] && printf '%s\n' "$notes_output" >&2
+    return 1
+  fi
+  if [ -n "$notes_output" ]; then
+    printf '%s\n' "$notes_output" | grep -v 'ignoring dangling symref' >&2 || true
+  fi
 }
 
 ensure_signed_on_verify() {
   local commit="$1"
-  resolve_policy
+  shiplog_policy_assert_loaded
 
   case "${SHIPLOG_SIGN_EFFECTIVE:-0}" in
     0|false|no|off) return 0 ;;
@@ -221,7 +477,7 @@ ensure_signed_on_verify() {
 
   local verify_file="$SIGNERS_FILE_EFFECTIVE"
   if [ -n "$verify_file" ] && [ -f "$verify_file" ]; then
-    GIT_SSH_ALLOWED_SIGNERS="$verify_file" git verify-commit "$commit" >/dev/null 2>&1 \
+    git -c gpg.ssh.allowedSignersFile="$verify_file" verify-commit "$commit" >/dev/null 2>&1 \
       || return 1
   else
     git verify-commit "$commit" >/dev/null 2>&1 || return 1
@@ -230,7 +486,7 @@ ensure_signed_on_verify() {
 }
 
 author_allowed() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   local author="$1"
   local allow="$ALLOWED_AUTHORS_EFFECTIVE"
   [ -z "$allow" ] && return 0
@@ -241,7 +497,7 @@ author_allowed() {
 }
 
 require_allowed_author() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   local allow="$ALLOWED_AUTHORS_EFFECTIVE"
   [ -z "$allow" ] && return 0
 
@@ -266,7 +522,7 @@ require_allowed_author() {
 }
 
 require_allowed_signer() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   case "${SHIPLOG_SIGN_EFFECTIVE:-0}" in
     0|false|no|off) return 0 ;;
   esac
@@ -285,7 +541,7 @@ require_allowed_signer() {
     die "shiplog: signing precheck failed (configure your signing key)"
   fi
 
-  if ! GIT_SSH_ALLOWED_SIGNERS="$asf" git verify-commit "$tmp" >/dev/null 2>&1; then
+  if ! git -c gpg.ssh.allowedSignersFile="$asf" verify-commit "$tmp" >/dev/null 2>&1; then
     die "shiplog: signature not accepted by allowed signers file ($asf)"
   fi
 }
@@ -317,7 +573,7 @@ pretty_ls() {
     author="$(git show -s --format='%ae' "$c")"
     date="$(git show -s --format='%cs' "$c")"
     body="$(git show -s --format=%B "$c")"
-    json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+    json="$(shiplog_extract_trailer <<< "$body")"
     if command -v jq >/dev/null 2>&1 && [ -n "$json" ]; then
       service="$(printf '%s' "$json" | jq -r '.what.service // empty')"
       env="$(printf '%s' "$json" | jq -r '.env // .where.env // empty')"
@@ -347,10 +603,11 @@ pretty_ls() {
 
 show_entry() {
   local target="$1"
-  local body human json
+  local body human json notes_ref
+  notes_ref=$(shiplog_notes_git_ref)
   body="$(git show -s --format=%B "$target")"
-  human="$(awk '/^---/{exit} {print}' <<< "$body")"
-  json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+  human="$(shiplog_extract_header <<< "$body")"
+  json="$(shiplog_extract_trailer <<< "$body")"
 
   local bosun_bin=""
   local bosun_available=0
@@ -370,8 +627,8 @@ show_entry() {
         printf '%s\n' "$json"
       fi
     fi
-    if git notes --ref="$NOTES_REF" show "$target" >/dev/null 2>&1; then
-      git notes --ref="$NOTES_REF" show "$target"
+    if git notes --ref="$notes_ref" show "$target" >/dev/null 2>&1; then
+      git notes --ref="$notes_ref" show "$target"
     fi
     return 0
   fi
@@ -386,8 +643,8 @@ show_entry() {
     fi
   fi
 
-  if git notes --ref="$NOTES_REF" show "$target" >/dev/null 2>&1; then
-    git notes --ref="$NOTES_REF" show "$target" | "$bosun_bin" style --title "Attached Log (notes)"
+  if git notes --ref="$notes_ref" show "$target" >/dev/null 2>&1; then
+    git notes --ref="$notes_ref" show "$target" | "$bosun_bin" style --title "Attached Log (notes)"
   fi
 }
 

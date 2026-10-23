@@ -62,6 +62,8 @@ git push origin refs/_shiplog/policy/current
 
 ### Per‑environment strictness
 
+A per‑environment `require_signed` overrides the global value **in both directions**: `prod: {require_signed: true}` tightens a global `false`, and `staging: {require_signed: false}` relaxes a global `true`. The hook and the CLI use an explicit `has("require_signed")` check, so an explicit `false` is honored rather than treated as absent.
+
 Use `deployment_requirements.<env>.require_signed=true` to require signatures only in selected environments (e.g., prod):
 
 ```

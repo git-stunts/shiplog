@@ -1,5 +1,5 @@
 {
-  "id": "SLT.ALPHA.026",
+  "id": "SLT.ALPHA.033",
   "labels": ["docs", "release-notes"],
   "milestone": "Alpha",
   "name": "Release notes: add Config Wizard + guidance",

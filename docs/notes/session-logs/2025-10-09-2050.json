@@ -1,0 +1,36 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Replicate cwd hint pattern for other install/bootstrap scripts"
+    }
+  ],
+  "date": "2025-10-09",
+  "key_decisions": [
+    "Use getpath-derived messages referencing the exact working directory"
+  ],
+  "summary": "Improved shiplog bootstrap trust script to surface current working directory when run outside a repo and added regression test while updating task state.",
+  "time": "20:50",
+  "topics": [
+    {
+      "context": "SLT.ALPHA.018 backlog item",
+      "future_work": "Consider similar hints for other helper scripts",
+      "issue": "Script only said to run inside a repo without path details",
+      "resolution": "Detect not-in-repo early and include resolved cwd + repo root checks",
+      "time_percent": 60,
+      "topic": "Bootstrap hint",
+      "what": "Added cwd-aware error message before trust bootstrap runs",
+      "why": "Users running the helper outside a repo saw a vague failure"
+    },
+    {
+      "context": "New test file test/25_bootstrap_trust.bats",
+      "future_work": "Expand coverage for positive bootstrap flow",
+      "issue": "No prior automated coverage for this scenario",
+      "resolution": "Test now runs helper in temp dir and validates failure output",
+      "time_percent": 40,
+      "topic": "Regression test",
+      "what": "Created Bats coverage to assert hint text and cwd inclusion",
+      "why": "Prevent future regressions when modifying bootstrap logic"
+    }
+  ]
+}

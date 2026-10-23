@@ -154,7 +154,10 @@ replace_block "$README_TASKS" "Beta" "$content_beta"
 replace_block "$README_TASKS" "v1.0.0" "$content_v1"
 replace_block "$README_TASKS" "Overall" "$content_overall"
 
-# Update root README Overall block
-replace_block "$README_ROOT" "Overall" "$content_overall"
+# Update the root README Overall block only if it still carries the markers
+# (the root README stopped mirroring the ledger when docs/tasks was frozen).
+if grep -qF '<!-- progress bar: Overall -->' "$README_ROOT"; then
+  replace_block "$README_ROOT" "Overall" "$content_overall"
+fi
 
 echo "Updated progress bars: MVP=${pmvp}% Alpha=${palpha}% Beta=${pbeta}% v1=${pv1}% Overall=${overall}%"

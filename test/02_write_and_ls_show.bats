@@ -39,7 +39,9 @@ teardown() {
 @test "write --dry-run previews without writing" {
   local unique_env="prod-write-dryrun-${BATS_TEST_NUMBER:-0}-${RANDOM}${RANDOM}"
   local journal_ref="${REF_ROOT}/journal/${unique_env}"
-  trap "git update-ref -d \"$journal_ref\" >/dev/null 2>&1 || true" EXIT
+  # No EXIT trap here: bats-core owns the EXIT trap, and overriding it hides
+  # failure output and skips teardown. The sandbox repo (and this ref) is
+  # removed by teardown (#148).
 
   git update-ref -d "$journal_ref" >/dev/null 2>&1 || true
 
@@ -160,4 +162,110 @@ teardown() {
     echo "Expected artifact $SHIPLOG_IMAGE:$SHIPLOG_TAG, got $field" >&2
     return 1
   fi
+}
+
+# --- SLT.BUG.CLI.001 (#97): header text can never corrupt the trailer -------
+
+@test "write: a --- line in the reason cannot wedge the journal" {
+  local ref="${REF_ROOT}/journal/prod"
+  run env SHIPLOG_REASON=$'rollback\n---\nsee runbook' SHIPLOG_SERVICE=$'web\nevil' git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  first=$(git rev-parse "$ref")
+
+  # The next write must still read seq from the previous entry.
+  run git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  run git shiplog show --json "$ref"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.seq')" = "1" ]
+
+  # Documented rule: newlines in header fields become spaces and round-trip.
+  run git shiplog show --json "$first"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.why.reason')" = "rollback --- see runbook" ]
+  [ "$(printf '%s\n' "$output" | jq -r '.what.service')" = "web evil" ]
+  run git show -s --format=%s "$first"
+  [[ "$output" == "Deploy: web evil"* ]]
+  run git shiplog validate-trailer "$first"
+  [ "$status" -eq 0 ]
+  run git shiplog ls
+  [ "$status" -eq 0 ]
+}
+
+@test "write rejects a status outside the documented enum" {
+  run env SHIPLOG_STATUS=bogus git shiplog --boring --yes write
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid status 'bogus'"* ]]
+  run git show-ref "${REF_ROOT}/journal/prod"
+  [ "$status" -ne 0 ]
+}
+
+@test "legacy entries with a stray --- in the header still parse and chain" {
+  local ref="${REF_ROOT}/journal/prod"
+  run git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  local parent tree json msg fixture
+  parent=$(git rev-parse "$ref")
+  tree=$(git rev-parse "${ref}^{tree}")
+  json=$(git shiplog show --json "$parent" | jq -c --arg p "$parent" '.seq = 1 | .journal_parent = $p')
+  # Old-format fixture: a bare --- line in the header followed by the writer
+  # sentinel and the JSON. The first-`---` reader returned garbage for this.
+  msg=$(printf 'Deploy: web → prod\nReason: rollback\n---\nsee runbook\nStatus: SUCCESS\n\n---  # structured trailer for machines\n%s\n' "$json")
+  fixture=$(printf '%s\n' "$msg" | GIT_AUTHOR_NAME="Shiplog Tester" GIT_AUTHOR_EMAIL="shiplog-tester@example.com" \
+    GIT_COMMITTER_NAME="Shiplog Tester" GIT_COMMITTER_EMAIL="shiplog-tester@example.com" \
+    git commit-tree "$tree" -p "$parent")
+  git update-ref "$ref" "$fixture" "$parent"
+
+  run git shiplog validate-trailer "$fixture"
+  [ "$status" -eq 0 ]
+  run git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  run git shiplog show --json "$ref"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.seq')" = "2" ]
+  [ "$(printf '%s\n' "$output" | jq -r '.journal_parent')" = "$fixture" ]
+}
+
+# --- SLT.BUG.LIB.012 (#158): one identity for allowlist, trailer and commit --
+
+@test "SHIPLOG_AUTHOR_* sets both the author and the committer of the entry" {
+  local ref="${REF_ROOT}/journal/prod"
+  run env SHIPLOG_AUTHORS="shiplog-tester@example.com bot@x" SHIPLOG_AUTHOR_NAME="Deploy Bot" SHIPLOG_AUTHOR_EMAIL="bot@x" \
+    git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  run git show -s --format='%an <%ae> / %cn <%ce>' "$ref"
+  [ "$output" = "Deploy Bot <bot@x> / Deploy Bot <bot@x>" ]
+  run git shiplog show --json "$ref"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.who.email')" = "bot@x" ]
+}
+
+@test "show, show --json and export-json read the trailer after the last sentinel" {
+  local ref="${REF_ROOT}/journal/prod"
+  run git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  local parent tree json msg fixture
+  parent=$(git rev-parse "$ref")
+  tree=$(git rev-parse "${ref}^{tree}")
+  json=$(git shiplog show --json "$parent" | jq -c --arg p "$parent" '.seq = 1 | .journal_parent = $p')
+  msg=$(printf 'Deploy: web → prod\nReason: rollback\n---\nsee runbook\nStatus: SUCCESS\n\n---  # structured trailer for machines\n%s\n' "$json")
+  fixture=$(printf '%s\n' "$msg" | GIT_AUTHOR_NAME="Shiplog Tester" GIT_AUTHOR_EMAIL="shiplog-tester@example.com" \
+    GIT_COMMITTER_NAME="Shiplog Tester" GIT_COMMITTER_EMAIL="shiplog-tester@example.com" \
+    git commit-tree "$tree" -p "$parent")
+  git update-ref "$ref" "$fixture" "$parent"
+
+  run git shiplog show --json "$fixture"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.seq')" = "1" ]
+  run git shiplog show --json-compact "$fixture"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.seq')" = "1" ]
+  run git shiplog export-json
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -s 'map(select(.commit == "'"$fixture"'")) | length')" = "1" ]
+  [ "$(printf '%s\n' "$output" | jq -s -r 'map(select(.commit == "'"$fixture"'"))[0].seq')" = "1" ]
+  run git shiplog --boring show "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"see runbook"* ]]
+  [[ "$output" == *'"seq": 1'* ]]
 }

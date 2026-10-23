@@ -126,8 +126,20 @@ read_json() {
   fi
 }
 
+document=$(read_json)
+# Exactly one JSON value: jq runs the filter zero times on an empty document
+# (which would pass) and once per value when there are several.
+value_count=$(printf '%s\n' "$document" | jq -n '[inputs] | length' 2>&1) || {
+  printf '%s\n' "$value_count" >&2
+  exit 2
+}
+if [ "$value_count" != 1 ]; then
+  printf 'policy: exactly one JSON value required (found %s)\n' "$value_count"
+  exit 1
+fi
+
 errors=""
-if ! errors=$(read_json | jq -r -f "$FILTER_PATH" 2>&1); then
+if ! errors=$(printf '%s\n' "$document" | jq -r -f "$FILTER_PATH" 2>&1); then
   printf '%s\n' "$errors" >&2
   exit 2
 fi

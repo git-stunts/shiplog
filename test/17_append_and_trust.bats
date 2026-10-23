@@ -53,7 +53,7 @@ teardown() {
 @test "append --dry-run previews without writing" {
   local unique_env="prod-append-dryrun-${BATS_TEST_NUMBER:-0}-${RANDOM}${RANDOM}"
   local journal_ref="${REF_ROOT}/journal/${unique_env}"
-  trap "git update-ref -d \"$journal_ref\" >/dev/null 2>&1 || true" EXIT
+  # No EXIT trap: bats-core owns it; the sandbox repo is removed by teardown (#148).
 
   git update-ref -d "$journal_ref" >/dev/null 2>&1 || true
 
@@ -73,7 +73,7 @@ teardown() {
   local unique_env="prod-append-stdin-${BATS_TEST_NUMBER:-0}-${RANDOM}${RANDOM}"
   export SHIPLOG_ENV="$unique_env"
   local journal_ref="${REF_ROOT}/journal/${SHIPLOG_ENV}"
-  trap "git update-ref -d \"$journal_ref\" >/dev/null 2>&1 || true" EXIT
+  # No EXIT trap: bats-core owns it; the sandbox repo is removed by teardown (#148).
 
   git update-ref -d "$journal_ref" >/dev/null 2>&1 || true
   before=$(git rev-parse "$journal_ref" 2>/dev/null || echo "")
@@ -106,4 +106,43 @@ teardown() {
   [[ "$output" == *"Trust ID"* ]]
   [[ "$output" == *"Allowed signers: "* ]]
   [[ "$output" == *"shiplog-tester@example.com"* ]]
+}
+
+# --- SLT.BUG.CLI.010 (#121): extras cannot forge core trailer fields --------
+
+@test "append rejects payloads that set reserved trailer keys" {
+  local before after
+  before=$(git rev-parse "${REF_ROOT}/journal/prod" 2>/dev/null || true)
+  run bash -c 'git shiplog append --service api --json '\''{"seq":42}'\'''
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'reserved trailer key "seq"'* ]]
+  run bash -c 'git shiplog append --service api --json '\''{"custom":1,"trust_oid":"deadbeef"}'\'''
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'reserved trailer key "trust_oid"'* ]]
+  run bash -c 'printf '\''{"status":"success","run":{}}'\'' | git shiplog append --service api --json -'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'reserved trailer key'* ]]
+  after=$(git rev-parse "${REF_ROOT}/journal/prod" 2>/dev/null || true)
+  [ "$before" = "$after" ]
+}
+
+@test "append keeps custom data beside the core keys" {
+  run bash -c 'git shiplog append --service api --json '\''{"custom":{"a":1}}'\'''
+  [ "$status" -eq 0 ]
+  run bash -c "git shiplog show --json ${REF_ROOT}/journal/prod"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.custom.a')" = "1" ]
+  [ "$(printf '%s\n' "$output" | jq -r '.seq')" = "0" ]
+  [ "$(printf '%s\n' "$output" | jq -r '.what.service')" = "api" ]
+  [ "$(printf '%s\n' "$output" | jq -r '.status')" = "success" ]
+}
+
+@test "append rejects the notes key that export-json adds at read time" {
+  local before after
+  before=$(git rev-parse "${REF_ROOT}/journal/prod" 2>/dev/null || true)
+  run bash -c 'git shiplog append --service api --json '\''{"notes":{"attached":true}}'\'''
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'reserved trailer key "notes"'* ]]
+  after=$(git rev-parse "${REF_ROOT}/journal/prod" 2>/dev/null || true)
+  [ "$before" = "$after" ]
 }
