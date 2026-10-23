@@ -53,7 +53,7 @@ teardown() {
 @test "append --dry-run previews without writing" {
   local unique_env="prod-append-dryrun-${BATS_TEST_NUMBER:-0}-${RANDOM}${RANDOM}"
   local journal_ref="${REF_ROOT}/journal/${unique_env}"
-  trap "git update-ref -d \"$journal_ref\" >/dev/null 2>&1 || true" EXIT
+  # No EXIT trap: bats-core owns it; the sandbox repo is removed by teardown (#148).
 
   git update-ref -d "$journal_ref" >/dev/null 2>&1 || true
 
@@ -73,7 +73,7 @@ teardown() {
   local unique_env="prod-append-stdin-${BATS_TEST_NUMBER:-0}-${RANDOM}${RANDOM}"
   export SHIPLOG_ENV="$unique_env"
   local journal_ref="${REF_ROOT}/journal/${SHIPLOG_ENV}"
-  trap "git update-ref -d \"$journal_ref\" >/dev/null 2>&1 || true" EXIT
+  # No EXIT trap: bats-core owns it; the sandbox repo is removed by teardown (#148).
 
   git update-ref -d "$journal_ref" >/dev/null 2>&1 || true
   before=$(git rev-parse "$journal_ref" 2>/dev/null || echo "")

@@ -39,7 +39,9 @@ teardown() {
 @test "write --dry-run previews without writing" {
   local unique_env="prod-write-dryrun-${BATS_TEST_NUMBER:-0}-${RANDOM}${RANDOM}"
   local journal_ref="${REF_ROOT}/journal/${unique_env}"
-  trap "git update-ref -d \"$journal_ref\" >/dev/null 2>&1 || true" EXIT
+  # No EXIT trap here: bats-core owns the EXIT trap, and overriding it hides
+  # failure output and skips teardown. The sandbox repo (and this ref) is
+  # removed by teardown (#148).
 
   git update-ref -d "$journal_ref" >/dev/null 2>&1 || true
 

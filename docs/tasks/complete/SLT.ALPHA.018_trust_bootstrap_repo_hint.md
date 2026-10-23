@@ -18,6 +18,6 @@
   ],
   "created": "2025-09-30",
   "updated": "2025-10-10",
-  "estimate": "sm",
+  "estimate": "small",
   "expected_complexity": "low"
 }

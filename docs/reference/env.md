@@ -4,26 +4,42 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
 
 ## Core
 
-- `SHIPLOG_REF_ROOT` — Root for Shiplog refs
-  - Default: `refs/_shiplog`
+- `SHIPLOG_REF_ROOT` — Root for every Shiplog ref (client and hook)
+  - Precedence: `SHIPLOG_REF_ROOT` env > `git config shiplog.refRoot` > `refs/_shiplog`
   - Alternate (branch namespace): `refs/heads/_shiplog`
-  - Affects journals/policy/trust/notes ref resolution.
+  - Must start with `refs/`; a trailing slash is stripped; invalid values abort the command.
+  - Journals (`<root>/journal/<env>`), anchors (`<root>/anchors/<env>`), policy, trust and notes
+    all derive from it. `git shiplog refs root show` prints the effective root, its source and
+    every derived ref (`--json` for machines). The CLI exports the resolved `SHIPLOG_REF_ROOT`,
+    `SHIPLOG_POLICY_REF` and `SHIPLOG_TRUST_REF` to the helper scripts it runs.
+
+| Derived ref | Source | Default |
+|-------------|--------|---------|
+| Journals | `<root>/journal/<env>` | `refs/_shiplog/journal/<env>` |
+| Anchors | `<root>/anchors/<env>` | `refs/_shiplog/anchors/<env>` |
+| Policy | `SHIPLOG_POLICY_REF` > `<root>/policy/current` | `refs/_shiplog/policy/current` |
+| Trust | `SHIPLOG_TRUST_REF` > `<root>/trust/root` | `refs/_shiplog/trust/root` |
+| Notes | `SHIPLOG_NOTES_REF` > policy `notes_ref` > `<root>/notes/logs` | `refs/_shiplog/notes/logs` |
 
 - `SHIPLOG_POLICY_REF` — Policy ref (JSON file lives at `.shiplog/policy.json` inside the ref)
-  - Default: `refs/_shiplog/policy/current`
+  - Default: `<ref root>/policy/current`
 
-- `SHIPLOG_TRUST_REF` — Trust ref (tree with `.shiplog/trust.json` and `.shiplog/allowed_signers`)
-  - Default: `refs/_shiplog/trust/root`
+- `SHIPLOG_TRUST_REF` — Trust ref (tree with `trust.json` and `allowed_signers`)
+  - Default: `<ref root>/trust/root`
 
 - `SHIPLOG_NOTES_REF` — Git notes ref for attached logs (NDJSON)
-  - Default: `refs/_shiplog/notes/logs`
+  - Default: `<ref root>/notes/logs`; this variable wins over a policy `notes_ref` (see docs/features/policy.md).
+  - `write`, `show`, `export-json` and `publish` all resolve the same notes ref; `publish` refuses to
+    push a journal whose entries claim `log_attached=true` when that notes ref does not exist locally.
 
 - `SHIPLOG_ENV` — Default journal environment when omitted on commands
   - Default: `prod`
 
 - `SHIPLOG_AUTO_PUSH` — Auto-push Shiplog refs to the configured remote when available (`write`, some `setup` flows)
-  - Values: `1` (default) or `0`
-  - Precedence: command flags > `git config shiplog.autoPush` > `SHIPLOG_AUTO_PUSH`.
+  - Values: `1` (default) or `0` (any boolean spelling, see below)
+  - Precedence: command flags (`--push`/`--no-push`) > `git config shiplog.autoPush` > `SHIPLOG_AUTO_PUSH` > default on. When the effective value is off and a remote exists, `write` prints a "remember to publish" hint.
+
+- Boolean variables (`SHIPLOG_AUTO_PUSH`, `SHIPLOG_BORING`, `SHIPLOG_DRY_RUN`, `SHIPLOG_SIGN`, `SHIPLOG_SETUP_*`) accept `1|true|yes|on` and `0|false|no|off`, case-insensitively. Any other value is an error: Shiplog fails closed rather than treating a typo as "off".
 
 - `SHIPLOG_REMOTE` — Remote name shiplog commands use for fetch/publish/push operations
   - Default: `origin` (or `git config shiplog.remote` when set)
@@ -43,30 +59,39 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
 
 ## Policy & Signing
 
-- `SHIPLOG_AUTHORS` — Space-separated allowlist of authors (emails). Overrides policy.
-- `SHIPLOG_ALLOWED_SIGNERS` — Path to allowed signers file (SSH). Overrides policy.
+- `SHIPLOG_AUTHORS` — Space-separated allowlist of authors (emails). Highest precedence: beats `git config shiplog.policy.allowedAuthors`, which beats the policy document.
+- `SHIPLOG_ALLOWED_SIGNERS` — Path to allowed signers file (SSH). Highest precedence: beats `git config shiplog.policy.allowedSignersFile`, then the policy's `allow_ssh_signers_file`; `gpg.ssh.allowedSignersFile` is only a fallback. Relative paths resolve from the repository root. See docs/features/policy.md for the full table.
 - `SHIPLOG_SIGN` — Require signing for `write` operations in this session (policy may still require it).
   - Values: `1` or `0` (default)
 
-- `SHIPLOG_REQUIRE_SIGNED_TRUST` — Server‑side gate in the pre‑receive hook to require the trust commit itself to be signed.
-  - Default: `0` (disabled). Recommended `1` in production.
-  - Interacts with threshold verification but is independent of it.
+- `SHIPLOG_REQUIRE_SIGNED_TRUST` — Server‑side gate (hook and `scripts/shiplog-verify-trust.sh`): the trust commit itself must carry a valid signature from a current (prior‑roster) maintainer.
+  - Default: `0`. Recommended `1` in production.
+  - Decides only whether the commit must be signed; the quorum (attestations, or the single signed commit in chain mode) always applies and is never waived.
   - Case‑insensitive: `1|true|yes|on` enables; `0|false|no|off` disables.
 
-- `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE` — How the trust gate is satisfied when enabled.
-  - Values: `commit` (default), `attestation`, `either`.
-  - `commit`: require `git verify-commit` on the trust commit.
-  - `attestation`: require the detached attestation threshold to verify under `.shiplog/trust_sigs/`.
-  - `either`: accept if either commit verification or attestation threshold verification passes.
+- `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE` — **Ignored** (a warning is printed when set). The former `either` shortcut let one commit signature waive the attestation quorum and was removed (decision D1, #113).
 
-- `SHIPLOG_GPG_FORMAT` — Force Git’s `gpg.format` during verification (`ssh` or `openpgp`). Default inherits repo config.
+- `SHIPLOG_ALLOW_TRUST_THRESHOLD_UNENFORCED` — When `1`, the trust quorum is not enforced and a loud warning is printed on every push. The only escape hatch; for staged migrations only.
 
-- `SHIPLOG_DEBUG_SSH_VERIFY` — Verbose debug for trust verification (shared script and hook).
+- `SHIPLOG_REQUIRE_SIGNED_POLICY` — Hook: policy ref updates must be signed by a current maintainer of the trust roster and contain `.shiplog/policy.json`.
+  - Default: `1` when a trust ref exists on the server, `0` otherwise (so a fresh server can receive its first policy before trust).
+
+- `SHIPLOG_ALLOW_REF_DELETE` — Hook: when `1`, deleting a Shiplog ref (`git push origin :refs/_shiplog/...`) is permitted and a warning is logged. Default: deletions are refused.
+
+- `SHIPLOG_REF_ROOT` (hook) — The ref root the server enforces. Default `refs/_shiplog`; set it to `refs/heads/_shiplog` when clients use the branch namespace. The hook derives the trust ref (`<root>/trust/root`), the policy ref (`<root>/policy/current`) and the journal/anchors/notes prefixes from it (notes are append-only: no deletion, fast-forward only) and matches pushed refs by those prefixes, so journals under the configured root are validated whichever layout you chose. The hook is not told the root by the client: it must be exported in the hook environment.
+
+- `SHIPLOG_ALLOW_MIXED_REF_ROOT` — Hook: by default the hook refuses to start when `SHIPLOG_TRUST_REF` or `SHIPLOG_POLICY_REF` points outside `SHIPLOG_REF_ROOT` (a mixed layout usually means journals under the root would go unenforced). Set `1` to accept a mixed layout deliberately; a warning is logged.
+
+- `SHIPLOG_SIGN_TRUST` — `scripts/shiplog-bootstrap-trust.sh`: sign the genesis trust commit (`1`) or not (`0`).
+  - Default: `1` when `git config user.signingkey` is set, otherwise `0` with a printed hint. `SHIPLOG_TRUST_SIGN` is a deprecated alias.
+
+- `SHIPLOG_HOME` (server) — Shiplog checkout the hook trusts for `lib/trust-verify.sh`, `scripts/shiplog-verify-trust.sh` and the policy validator. Overrides: `SHIPLOG_TRUST_VERIFY_LIB`, `SHIPLOG_VERIFY_TRUST_BIN` (must be under a safe prefix and not group/world writable, or the push is refused).
+
+- `SHIPLOG_DEBUG_SSH_VERIFY` — Verbose debug for trust verification (shared module, verifier script and hook).
   - Values: `1` or `0` (default)
-  - Prints gate status/mode, principals discovered in `allowed_signers`, signature failure details, attestation payload tree OID, and per‑signature verification results.
+  - Prints the module/verifier paths in use, the roster commit used for the quorum, principals discovered in `allowed_signers`, the payload tree OID and SHA‑256, per‑signature decisions (counted, duplicate key, wildcard, not a maintainer, revoked) and `git verify-commit` output on failure.
 
-- `SHIPLOG_ATTEST_BACKCOMP` — When `1`, the verifier will attempt an alternate payload mode on failure (base vs full tree) for back‑compat signatures.
-  - Default: `0` (off)
+- Removed: `SHIPLOG_GPG_FORMAT` (Git detects the signature type from the signature itself), `SHIPLOG_ATTEST_PAYLOAD_MODE` and `SHIPLOG_ATTEST_BACKCOMP` (a full‑tree payload can never verify once `.sig` files are in the tree).
 
 ## Write Inputs (non-interactive)
 
@@ -84,13 +109,21 @@ See: docs/features/write.md for full semantics and examples.
 
 - `SHIPLOG_SETUP_STRICTNESS` — `open` | `balanced` | `strict`
 - `SHIPLOG_SETUP_STRICT_ENVS` — Space-separated envs for per-env strictness (strict only)
-- `SHIPLOG_SETUP_AUTHORS` — Space-separated emails for allowlist (balanced)
+- `SHIPLOG_SETUP_AUTHORS` — Space-separated emails for the allowlist (any strictness; `balanced` and `strict` default to `git config user.email` when empty)
 - `SHIPLOG_SETUP_AUTO_PUSH` — `1` to push policy/trust to origin
 - `SHIPLOG_SETUP_DRY_RUN` — `1` to preview without writing/syncing
 
+## Policy Publishing
+
+- `SHIPLOG_POLICY_SIGN` — `scripts/shiplog-sync-policy.sh` (also used by `setup`, `policy require-signed` and `policy toggle`): sign the policy commit (`1`) or not (`0`).
+  - Default: `1` when `git config user.signingkey` is set, otherwise `0` with a printed hint. The pre-receive hook requires a maintainer signature on policy updates once a trust ref exists.
+- `SHIPLOG_POLICY_REF` — Policy ref the sync script and the CLI read/write (default `refs/_shiplog/policy/current`).
+- `SHIPLOG_POLICY_MESSAGE` — Commit message used by the sync script.
+- `SHIPLOG_REPO_ROOT` — *(exported by `git shiplog`, read-only for users)* Repository root that `.shiplog/policy.json`, `.shiplog/plugins` and relative signers paths resolve against, so commands behave the same from a subdirectory.
+
 ## Dry Run
 
-- `SHIPLOG_DRY_RUN` — Boolean/string flag (default `0`/`false`). When set to `1`, `true`, `yes`, or `on`, Shiplog enters dry-run mode: write/append/run/setup subcommands log intended actions without updating journals, notes, or pushing refs. Example: `export SHIPLOG_DRY_RUN=1` (bash/zsh) or `set -x SHIPLOG_DRY_RUN 1` (fish). Set `0`, `false`, `no`, or `off` to disable.
+- `SHIPLOG_DRY_RUN` — Boolean flag (default `0`/`false`). When set to `1`, `true`, `yes`, or `on` (any case), Shiplog enters dry-run mode: write/append/run/setup subcommands log intended actions without updating journals, notes, or pushing refs. Example: `export SHIPLOG_DRY_RUN=1` (bash/zsh) or `set -x SHIPLOG_DRY_RUN 1` (fish). Set `0`, `false`, `no`, or `off` to disable. Any other value (and any other value for `--dry-run=VALUE`) is an error.
 
 ## Trust Bootstrap (non-interactive)
 

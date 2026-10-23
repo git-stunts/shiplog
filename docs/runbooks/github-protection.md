@@ -12,20 +12,20 @@ This runbook walks through protecting Shiplog refs on GitHub.com using Rulesets 
   - Pros: visible in Branches UI; Branch Rulesets apply; Actions can trigger on pushes.
   - Cons: visible “system branches”; branch cleanup bots could target them if not excluded.
 
-See [[docs/hosting/github.md]] for a detailed tradeoff.
+See [docs/hosting/github.md](../hosting/github.md) for a detailed tradeoff.
 
 ## 2) (Optional) Migrate to Branch Namespace
 
 ```
-# Dry run migration
-scripts/shiplog-migrate-ref-root.sh --to refs/heads/_shiplog --dry-run
+# Dry run: print the plan, change nothing
+git shiplog refs migrate --to refs/heads/_shiplog --dry-run
 
-# Mirror and push
-scripts/shiplog-migrate-ref-root.sh --to refs/heads/_shiplog --push
-
-# Point Shiplog at the new root
-git config shiplog.refRoot refs/heads/_shiplog
+# Mirror every ref under the root (journals, anchors, policy, trust, notes),
+# record `git config shiplog.refRoot refs/heads/_shiplog`, and push the new refs
+git shiplog refs migrate --to refs/heads/_shiplog --push
 ```
+
+`git shiplog refs migrate` wraps `scripts/shiplog-migrate-ref-root.sh`. An exported `SHIPLOG_REF_ROOT` still wins over the recorded config, so update or unset it afterwards. Server hooks and CI must use the same root.
 
 ## 3) Import a Ruleset (Branch Namespace)
 

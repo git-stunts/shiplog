@@ -90,6 +90,10 @@ setup() {
   export SHIPLOG_SIGN=0
   export SHIPLOG_AUTO_PUSH=0
   export SHIPLOG_ENV=prod
+  # These cases exercise journal validation with an unsigned policy fixture. The hook
+  # now requires policy commits to be signed by a current maintainer once a trust ref
+  # exists (SLT.BUG.TRUST.009); relax that gate explicitly here.
+  export SHIPLOG_REQUIRE_SIGNED_POLICY=0
 
   REMOTE_DIR=$(mktemp -d)
   git init --bare "$REMOTE_DIR"

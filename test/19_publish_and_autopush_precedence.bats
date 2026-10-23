@@ -130,3 +130,71 @@ EOF
   rm -f .git/hooks/pre-push .git/prepush-publish.log
   rm -rf "$REMOTE_DIR"
 }
+
+# --- SLT.BUG.CLI.009: flags > git config shiplog.autoPush > SHIPLOG_AUTO_PUSH, with boolean parsing ----
+
+make_bare_origin() {
+  REMOTE_DIR=$(mktemp -d)
+  git remote remove origin >/dev/null 2>&1 || true
+  git init -q --bare "$REMOTE_DIR"
+  git remote add origin "$REMOTE_DIR"
+  export SHIPLOG_BORING=1
+  export SHIPLOG_SERVICE=autopush
+  export SHIPLOG_STATUS=success
+  export SHIPLOG_REASON=precedence
+  export SHIPLOG_REGION=us
+  export SHIPLOG_CLUSTER=c
+  export SHIPLOG_NAMESPACE=ns
+}
+
+remote_has_prod() {
+  git --git-dir="$REMOTE_DIR" rev-parse --verify refs/_shiplog/journal/prod >/dev/null 2>&1
+}
+
+@test "auto-push: git config shiplog.autoPush=true beats SHIPLOG_AUTO_PUSH=0" {
+  make_bare_origin
+  git config shiplog.autoPush true
+  run env SHIPLOG_AUTO_PUSH=0 git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  remote_has_prod
+  rm -rf "$REMOTE_DIR"
+}
+
+@test "auto-push: SHIPLOG_AUTO_PUSH=false disables pushing when no config is set" {
+  make_bare_origin
+  git config --unset-all shiplog.autoPush >/dev/null 2>&1 || true
+  run env SHIPLOG_AUTO_PUSH=false git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  ! remote_has_prod
+  [[ "$output" == *"remember to publish"* ]]
+  rm -rf "$REMOTE_DIR"
+}
+
+@test "auto-push: --no-push beats git config and prints the publish hint" {
+  make_bare_origin
+  git config shiplog.autoPush true
+  run git shiplog --boring --yes --no-push write
+  [ "$status" -eq 0 ]
+  ! remote_has_prod
+  [[ "$output" == *"remember to publish"* ]]
+  rm -rf "$REMOTE_DIR"
+}
+
+@test "auto-push: --push beats git config shiplog.autoPush=false" {
+  make_bare_origin
+  git config shiplog.autoPush false
+  run env SHIPLOG_AUTO_PUSH=0 git shiplog --boring --yes --push write
+  [ "$status" -eq 0 ]
+  remote_has_prod
+  rm -rf "$REMOTE_DIR"
+}
+
+@test "auto-push: an unparseable git config shiplog.autoPush is an error, not a push" {
+  make_bare_origin
+  git config shiplog.autoPush sometimes
+  run git shiplog --boring --yes write
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"shiplog.autoPush"* ]]
+  ! remote_has_prod
+  rm -rf "$REMOTE_DIR"
+}
