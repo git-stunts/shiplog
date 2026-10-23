@@ -78,7 +78,8 @@ git shiplog publish --env prod
 > ```bash
 > SHIPLOG_ENV=prod SHIPLOG_SERVICE=web \
 > git shiplog --boring --yes write --status success --reason "first ci run"
-  
+> ```
+
 ### 3. Browse History
 
 Review the deployment history with clean TTY or structured output.
