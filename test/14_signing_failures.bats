@@ -143,9 +143,12 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK=1"* ]]
 
-  # ...the server does not: its only roster is the trust ref.
+  # ...the server does not: its only roster is the trust ref. Assert the
+  # reason, so a rejection for anything else (missing policy, author, ...)
+  # cannot make this test pass.
   run git push "$REMOTE_NAME" refs/_shiplog/journal/prod
   [ "$status" -ne 0 ]
+  [[ "$output" == *"not accepted by the trust roster"* ]]
   run git --git-dir="$REMOTE_DIR" rev-parse --verify refs/_shiplog/journal/prod
   [ "$status" -ne 0 ]
 }
