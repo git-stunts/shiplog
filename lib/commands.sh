@@ -1655,7 +1655,16 @@ cmd_refs() {
       if [ ! -x "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" ]; then
         die "migration helper missing: $SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh"
       fi
-      "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" "$@"
+      # The global flag parser consumes --dry-run before it reaches us; forward
+      # an explicit dry-run so the helper previews instead of migrating.
+      local -a migrate_args=("$@")
+      if [ "${SHIPLOG_DRY_RUN_EXPLICIT:-0}" = "1" ]; then
+        case "${SHIPLOG_DRY_RUN:-0}" in
+          0|false|no|off|'') ;;
+          *) migrate_args+=(--dry-run) ;;
+        esac
+      fi
+      "$SHIPLOG_HOME/scripts/shiplog-migrate-ref-root.sh" ${migrate_args[@]+"${migrate_args[@]}"}
       ;;
     *) die "Unknown refs subcommand: ${sub:-<none>}" ;;
   esac
@@ -2327,7 +2336,7 @@ cmd_validate_trailer() {
     return 1
   fi
   # Structural validation: required fields and basic types
-  local err jq_output jq_status
+  local err jq_output jq_status=0
   jq_output=$(printf '%s\n' "$json" | jq -r '
     def _validate($msg; $value; $expected; $minlen):
       (try $value catch null) as $v
@@ -2362,8 +2371,7 @@ cmd_validate_trailer() {
       req_nested_int_ge("missing_or_invalid:when.dur_s"; ["when", "dur_s"]; 0)
     ]
     | map(select(length > 0))
-    | .[]' 2>&1)
-  jq_status=$?
+    | .[]' 2>&1) || jq_status=$?
   if [ "$jq_status" -ne 0 ]; then
     [ -n "$jq_output" ] && printf '%s\n' "$jq_output" >&2
     die "shiplog: trailer validation failed (jq status $jq_status)"

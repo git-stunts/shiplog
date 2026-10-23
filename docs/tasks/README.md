@@ -1,6 +1,12 @@
 # Shiplog Tasks & Milestones
 
-This is the single source of truth for tasks. Each task lives as a JSON file in one of:
+> [!WARNING]
+> **FROZEN (2026-10-22).** This ledger is historical. GitHub issues are the source of truth
+> and [`ROADMAP.md`](../../ROADMAP.md) holds the plan; live status is on
+> [tracking issue #155](https://github.com/git-stunts/shiplog/issues/155).
+> Do not add task files here.
+
+Each task lives as a Markdown file containing JSON in one of:
 
 - backlog/: not started
 - active/: being worked on

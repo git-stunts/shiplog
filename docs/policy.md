@@ -67,5 +67,6 @@ Lookup order for each per-environment field: `deployment_requirements.<env>.<fie
 - Keep semantic versioning consistent to signal breaking policy format changes.
 - Before committing or publishing `.shiplog/policy.json`, run `scripts/policy/validate.sh` or `git shiplog policy validate`. The CLI validates the working-tree file when it exists (and notes when it differs from the published ref); use `--ref` to check the published policy or `--file PATH` for any file.
 - `scripts/shiplog-sync-policy.sh` runs the same validator and refuses to publish an invalid document. It signs the policy commit when `git config user.signingkey` is set (override with `SHIPLOG_POLICY_SIGN=1|0`).
+- Once a trust ref exists on the server, the pre-receive hook accepts a policy update only when the commit is signed by a current maintainer of the trust roster, contains `.shiplog/policy.json`, and passes the validator (`SHIPLOG_REQUIRE_SIGNED_POLICY`; see `docs/TRUST.md`). Publish with `SHIPLOG_POLICY_SIGN=1 scripts/shiplog-sync-policy.sh`.
 - A policy document that fails validation stops `write`, `run`, `append`, `verify` and `policy show`; Shiplog never falls back to the permissive defaults while a broken document exists.
 - The validator enforces canonical semver versions and optional-field rules defined in `scripts/lib/policy_validate.jq`, so failing locally prevents broken pushes.

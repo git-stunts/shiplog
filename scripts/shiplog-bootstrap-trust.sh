@@ -12,6 +12,14 @@ else
   echo "shiplog-bootstrap-trust: missing $COMMON_LIB" >&2
   exit 1
 fi
+TRUST_VERIFY_LIB="${SHIPLOG_TRUST_VERIFY_LIB:-$SHIPLOG_HOME/lib/trust-verify.sh}"
+if [ -f "$TRUST_VERIFY_LIB" ]; then
+  # shellcheck disable=SC1090
+  . "$TRUST_VERIFY_LIB"
+else
+  echo "shiplog-bootstrap-trust: missing $TRUST_VERIFY_LIB" >&2
+  exit 1
+fi
 
 BOSUN_BIN="${SHIPLOG_BOSUN_BIN:-$SHIPLOG_HOME/scripts/bosun}"
 if command -v "$BOSUN_BIN" >/dev/null 2>&1; then
@@ -175,14 +183,26 @@ done
 
 need git
 need jq
-# Default to unsigned trust commits unless explicitly requested
-SIGN_TRUST_RAW="${SHIPLOG_SIGN_TRUST:-${SHIPLOG_TRUST_SIGN:-0}}"
-# Normalize SIGN_TRUST to 1/0 and validate
-case "$(printf '%s' "$SIGN_TRUST_RAW" | tr '[:upper:]' '[:lower:]' | sed -e 's/^\s*//' -e 's/\s*$//')" in
+# Sign the genesis trust commit by default when a signing key is configured.
+# SHIPLOG_SIGN_TRUST=1|0 overrides; SHIPLOG_TRUST_SIGN is a deprecated alias.
+if [ -n "${SHIPLOG_TRUST_SIGN:-}" ] && [ -z "${SHIPLOG_SIGN_TRUST:-}" ]; then
+  echo "WARN: SHIPLOG_TRUST_SIGN is deprecated; use SHIPLOG_SIGN_TRUST" >&2
+fi
+SIGN_TRUST_RAW="${SHIPLOG_SIGN_TRUST:-${SHIPLOG_TRUST_SIGN:-}}"
+SIGN_TRUST_HINT=0
+sign_trust_default() {
+  if [ -n "$(git config user.signingkey 2>/dev/null || true)" ]; then
+    SIGN_TRUST=1
+  else
+    SIGN_TRUST=0
+    SIGN_TRUST_HINT=1
+  fi
+}
+case "$(printf '%s' "$SIGN_TRUST_RAW" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')" in
   1|true|yes|on) SIGN_TRUST=1 ;;
   0|false|no|off) SIGN_TRUST=0 ;;
-  "") SIGN_TRUST=1 ;;
-  *) echo "WARN: invalid SHIPLOG_SIGN_TRUST='$SIGN_TRUST_RAW'; defaulting to 1" >&2; SIGN_TRUST=1 ;;
+  "") sign_trust_default ;;
+  *) echo "WARN: invalid SHIPLOG_SIGN_TRUST='$SIGN_TRUST_RAW'; deciding from user.signingkey" >&2; sign_trust_default ;;
 esac
 
 CWD=$(pwd -P 2>/dev/null || pwd)
@@ -445,7 +465,10 @@ fi
 
 # End non-interactive/interactive branching
 
-summary="Trust ID: $trust_id\nThreshold: $threshold\nMaintainers:"
+# Normalize once; the verifier compares sig_mode case-sensitively.
+sig_mode=$(printf '%s' "${sig_mode:-chain}" | tr '[:upper:]' '[:lower:]')
+
+summary="Trust ID: $trust_id\nThreshold: $threshold\nSigning mode: $sig_mode\nMaintainers:"
 for i in "${!maint_names[@]}"; do
 summary+=$'\n  - '
   summary+="${maint_names[$i]} <${maint_emails[$i]}> (role: ${maint_roles[$i]}, revoked: ${maint_revoked[$i]})"
@@ -474,37 +497,34 @@ if [ -e "$signers_path" ] && [ "$FORCE" -ne 1 ]; then
   prompt_confirm "Overwrite existing $signers_path?" 0 || die "Refusing to overwrite $signers_path"
 fi
 
-maintainers_json=""
+# Build trust.json with jq so every value is quoted correctly (a previous
+# version wrote literal "\n" sequences and produced invalid JSON).
+maintainers_json='[]'
 for i in "${!maint_names[@]}"; do
-  name_q=$(json_quote "${maint_names[$i]}" | tr -d '\n')
-  email_q=$(json_quote "${maint_emails[$i]}" | tr -d '\n')
-  role_q=$(json_quote "${maint_roles[$i]}" | tr -d '\n')
-  if [ -n "${maint_fprs[$i]}" ]; then
-    fpr_q=$(json_quote "${maint_fprs[$i]}" | tr -d '\n')
-  else
-    fpr_q="null"
-  fi
-  revoked_val="${maint_revoked[$i]}"
-  maint_json="    {\n      \"name\": $name_q,\n      \"email\": $email_q,\n      \"pgp_fpr\": $fpr_q,\n      \"role\": $role_q,\n      \"revoked\": $revoked_val\n    }"
-  if [ -n "$maintainers_json" ]; then
-    maintainers_json+=$',\n'
-  fi
-  maintainers_json+="$maint_json"
+  maintainers_json=$(jq -c \
+    --arg name "${maint_names[$i]}" \
+    --arg email "${maint_emails[$i]}" \
+    --arg fpr "${maint_fprs[$i]}" \
+    --arg role "${maint_roles[$i]}" \
+    --arg principal "${maint_principals[$i]}" \
+    --argjson revoked "${maint_revoked[$i]}" \
+    '. + [{
+      name: $name,
+      email: $email,
+      pgp_fpr: (if $fpr == "" then null else $fpr end),
+      role: $role,
+      revoked: $revoked
+    } + (if $principal != "" and $principal != $email then {principal: $principal} else {} end)]' \
+    <<<"$maintainers_json")
 done
 
-trust_id_q=$(json_quote "$trust_id" | tr -d '\n')
-sig_mode_q=$(json_quote "${sig_mode:-chain}" | tr -d '\n')
-cat > "$trust_path" <<JSON_DOC
-{
-  "version": 1,
-  "id": $trust_id_q,
-  "sig_mode": $sig_mode_q,
-  "threshold": $threshold,
-  "maintainers": [
-$maintainers_json
-  ]
-}
-JSON_DOC
+jq -n \
+  --arg id "$trust_id" \
+  --arg sig_mode "$sig_mode" \
+  --argjson threshold "$threshold" \
+  --argjson maintainers "$maintainers_json" \
+  '{version: 1, id: $id, sig_mode: $sig_mode, threshold: $threshold, maintainers: $maintainers}' \
+  > "$trust_path"
 
 tmp_signers=""
 for i in "${!maint_principals[@]}"; do
@@ -514,7 +534,50 @@ printf '%s' "$tmp_signers" > "$signers_path"
 
 OID_TRUST=$(git hash-object -w "$trust_path")
 OID_SIGS=$(git hash-object -w "$signers_path")
-TREE=$(printf '100644 blob %s\ttrust.json\n100644 blob %s\tallowed_signers\n' "$OID_TRUST" "$OID_SIGS" | git mktree)
+BASE_TREE=$(printf '100644 blob %s\ttrust.json\n100644 blob %s\tallowed_signers\n' "$OID_TRUST" "$OID_SIGS" | git mktree)
+TREE="$BASE_TREE"
+
+# Attestation mode: the genesis commit must already carry the bootstrapping
+# maintainer's attestation under .shiplog/trust_sigs/<principal>.sig, signed over
+# the canonical payload (lib/trust-verify.sh builds it; the hook verifies it).
+if [ "$sig_mode" = "attestation" ]; then
+  attest_key="$(git config user.signingkey 2>/dev/null || true)"
+  attest_format="$(git config gpg.format 2>/dev/null || echo openpgp)"
+  attest_principal=""
+  attest_pub=""
+  case "$attest_key" in
+    ~/*) attest_key="$HOME/${attest_key#~/}" ;;
+  esac
+  if [ -n "$attest_key" ] && [ "$attest_format" = "ssh" ] && [ -r "$attest_key" ] && command -v ssh-keygen >/dev/null 2>&1; then
+    attest_pub="$(ssh-keygen -y -f "$attest_key" 2>/dev/null | awk '{print $1" "$2}' || true)"
+  fi
+  if [ -n "$attest_pub" ]; then
+    for i in "${!maint_keys[@]}"; do
+      if [ "$(printf '%s' "${maint_keys[$i]}" | awk '{print $1" "$2}')" = "$attest_pub" ]; then
+        attest_principal="${maint_principals[$i]}"
+        break
+      fi
+    done
+  fi
+  if [ -n "$attest_principal" ]; then
+    attest_tmp=$(mktemp -d)
+    trust_verify_payload_from_parts "$BASE_TREE" "$trust_id" "$threshold" "$TV_ZERO_OID" > "$attest_tmp/payload"
+    if ssh-keygen -Y sign -f "$attest_key" -n "${SHIPLOG_TRUST_NAMESPACE:-shiplog-trust}" - < "$attest_tmp/payload" > "$attest_tmp/sig" 2>/dev/null; then
+      mkdir -p "$REPO_ROOT/.shiplog/trust_sigs"
+      cp "$attest_tmp/sig" "$REPO_ROOT/.shiplog/trust_sigs/$attest_principal.sig"
+      OID_ASIG=$(git hash-object -w "$attest_tmp/sig")
+      SIGS_TREE=$(printf '100644 blob %s\t%s.sig\n' "$OID_ASIG" "$attest_principal" | git mktree)
+      DOT_TREE=$(printf '040000 tree %s\ttrust_sigs\n' "$SIGS_TREE" | git mktree)
+      TREE=$(printf '100644 blob %s\ttrust.json\n100644 blob %s\tallowed_signers\n040000 tree %s\t.shiplog\n' "$OID_TRUST" "$OID_SIGS" "$DOT_TREE" | git mktree)
+      printf '✅ Wrote genesis attestation .shiplog/trust_sigs/%s.sig\n' "$attest_principal"
+    else
+      echo "WARN: ssh-keygen -Y sign failed; genesis commit carries no attestation" >&2
+    fi
+    rm -rf "$attest_tmp"
+  else
+    echo "WARN: attestation mode but no SSH signing key matching a maintainer is configured (git config gpg.format ssh; user.signingkey <private key path>); the genesis commit carries no attestation and a hook enforcing threshold $threshold will reject it. Add attestations with scripts/shiplog-trust-sign.sh before pushing." >&2
+  fi
+fi
 
 AUTHOR_NAME="${GIT_AUTHOR_NAME:-$(git config user.name || echo "Shiplog Trust")}" \
 AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-$(git config user.email || echo "trust@local")}" \
@@ -530,7 +593,13 @@ if [ "$SIGN_TRUST" != "0" ]; then
   commit_flags+=( -S )
   # Validate signing is properly configured
   if ! git config user.signingkey >/dev/null 2>&1; then
-    die "GPG signing requested but user.signingkey not configured"
+    die "SHIPLOG_SIGN_TRUST=1 requested a signed trust commit but git config user.signingkey is not set"
+  fi
+else
+  if [ "$SIGN_TRUST_HINT" -eq 1 ]; then
+    echo "hint: no signing key configured (git config user.signingkey); the genesis trust commit will be UNSIGNED. Configure a key and set SHIPLOG_SIGN_TRUST=1 to sign it; servers with SHIPLOG_REQUIRE_SIGNED_TRUST=1 reject unsigned trust commits." >&2
+  else
+    echo "hint: SHIPLOG_SIGN_TRUST=0; the genesis trust commit will be unsigned." >&2
   fi
 fi
 if ! GENESIS=$(printf '%s\n' "$commit_message" | \

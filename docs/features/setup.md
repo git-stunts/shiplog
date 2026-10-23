@@ -25,7 +25,7 @@ SHIPLOG_SETUP_AUTO_PUSH=1 \
 
 When bootstrapping trust, you can pick how quorum signatures are recorded and verified:
 
-- `chain` — co‑sign chain of commits (pure Git; great with server hooks)
+- `chain` — one signed trust commit (pure Git; threshold 1 only)
 - `attestation` — detached signatures stored under `.shiplog/trust_sigs/` (great for PRs on SaaS hosts)
 
 Set explicitly via flags or env during setup/bootstrap:

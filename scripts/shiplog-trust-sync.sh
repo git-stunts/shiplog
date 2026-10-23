@@ -24,9 +24,15 @@ fi
 DEST_DIR="$(dirname "$DEST")"
 mkdir -p "$DEST_DIR"
 
-git cat-file -p "$BLOB" > "$DEST"
-chmod 600 "$DEST"
+# Git resolves gpg.ssh.allowedSignersFile relative to the process working
+# directory (only ~ is expanded), so store an absolute path: verification from
+# a subdirectory or a CI step that cd's must still find the roster.
+DEST_DIR_ABS="$(cd "$DEST_DIR" && pwd -P)"
+DEST_ABS="$DEST_DIR_ABS/$(basename "$DEST")"
 
-git config gpg.ssh.allowedSignersFile "$DEST"
+git cat-file -p "$BLOB" > "$DEST_ABS"
+chmod 600 "$DEST_ABS"
 
-printf '✅ installed allowed_signers from %s → %s\n' "$TRUST_REF" "$DEST"
+git config gpg.ssh.allowedSignersFile "$DEST_ABS"
+
+printf '✅ installed allowed_signers from %s → %s\n' "$TRUST_REF" "$DEST_ABS"
