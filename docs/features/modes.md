@@ -10,7 +10,7 @@ Policy controls which mode is active. You can switch at any time without rewriti
 ## Current Mode and Defaults
 
 - Default mode: unsigned. The CLI does not sign by default unless the policy requires it or you set `SHIPLOG_SIGN=1`.
-- To view effective policy: `git shiplog policy` (planned) or inspect `.shiplog/policy.json` and the policy ref (`refs/_shiplog/policy/current`).
+- To view the effective policy: `git shiplog policy show` (add `--json` for machine output). The policy document lives in the policy ref `<ref root>/policy/current` (default root `refs/_shiplog`; see `git shiplog refs root show`) or in `.shiplog/policy.json`.
 
 ## Enabling Signing
 
@@ -88,10 +88,10 @@ The CLI setup wizard supports this via `--strict-envs "prod staging"`.
 
 ```
 # Edit .shiplog/policy.json
-{"version": 1, "require_signed": false, ...}
+{"version": "1.0.0", "require_signed": false, ...}
 
 ./scripts/shiplog-sync-policy.sh
-git push origin refs/_shiplog/policy/current
+git push --no-verify origin refs/_shiplog/policy/current   # <ref root>/policy/current
 ```
 
 Per-environment entries win over the global value: an environment with `deployment_requirements.<env>.require_signed: true` (or one that inherits it from `deployment_requirements.default`) still requires signatures after the global value becomes `false`. To disable signing everywhere, also remove those entries or set them to `false`.
