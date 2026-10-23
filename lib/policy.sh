@@ -64,7 +64,8 @@ POLICY_DOC_PATH=""
 # Per-environment fields use explicit has() checks so an explicit `false`
 # overrides an inherited `true`; the lookup order is
 # deployment_requirements[ENV] → deployment_requirements.default → top level.
-# The pre-receive hook applies the same rule for require_signed.
+# The pre-receive hook does not yet apply the `default` step: it reads
+# deployment_requirements[ENV].require_signed, then the top-level field (#127).
 SHIPLOG_POLICY_EXTRACT_JQ='
   def envreq($f):
     if (.deployment_requirements | type) == "object"
