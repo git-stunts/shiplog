@@ -312,6 +312,8 @@ Out: product code. Requires G3 and G6.
 - `issues-closed:163`
 - `grep:.github/workflows/ci.yml:git shiplog run`
 - `grep:.github/workflows/ci.yml:git shiplog verify`
+- `grep:.github/workflows/ci.yml:pull_request`
+- `exec:gh api repos/git-stunts/shiplog/rules/branches/main --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | any(test("verify"))' | grep -qx true`
 - `file:.shiplog/policy.json`
 - `exec:git ls-remote --exit-code origin refs/heads/_shiplog/journal/ci`
 - `grep:README.md:journal/ci`

@@ -281,6 +281,8 @@ self_test() {
   parse_roadmap || rc=1
   [ "${#GOALS[@]}" -ge 9 ] || { echo "self-test: expected >= 9 goals, got ${#GOALS[@]}"; rc=1; }
   [ -n "${GOAL_CHECKS[G1]:-}" ] || { echo "self-test: G1 has no checks"; rc=1; }
+  # G9 is done only when main's rules require the verify check, not merely when ci.yml mentions it.
+  [[ "${GOAL_CHECKS[G9]:-}" == *required_status_checks*verify* ]] || { echo "self-test: G9 does not check that verify is a required status check"; rc=1; }
   rm -rf "$t"
   # The workflow holds an issues:write token: actions pinned to a full SHA, no persisted credentials.
   if grep -E '^[[:space:]]*(- )?uses:' "$ROOT/.github/workflows/roadmap.yml" | grep -Evq '@[0-9a-f]{40}([[:space:]]|$)' \
