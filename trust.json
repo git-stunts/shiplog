@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "id": "shiplog-trust-root",
+  "sig_mode": "attestation",
+  "threshold": 1,
+  "maintainers": [
+    {"name": "James Ross", "email": "james@flyingrobots.dev", "pgp_fpr": null, "role": "root", "revoked": false}
+  ]
+}
