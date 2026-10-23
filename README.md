@@ -29,7 +29,7 @@ Your deployment history lives in systems you don't control, in formats you can't
 
 **Shiplog puts it in the one place that already has retention, replication, signatures, and `grep`: your Git repository.**
 
-Every deployment becomes a commit under `refs/_shiplog/journal/<env>`: who, what, where, when, why, how, exit code, and the full log as a Git note. It's `git log` for the thing `git log` never told you — what actually happened after you pushed.
+Every deployment becomes a commit under `refs/_shiplog/journal/<env>`: who, what, where, when, why, how, and, for `git shiplog run`, the exit code and the full log as a Git note. It's `git log` for the thing `git log` never told you — what actually happened after you pushed.
 
 ---
 
@@ -43,7 +43,7 @@ The whole philosophy:
 | A database | Commits with a JSON trailer | `jq` is a database. Fight me |
 | A log aggregator | Git notes | Logs attached to the exact deployment, forever, offline |
 | A permissions service | A policy file in a ref | Policy is code. Code is reviewed |
-| A signing service | SSH keys you already have | `ssh-keygen -Y` has been there since OpenSSH 8.2 |
+| A signing service | SSH keys you already have | `ssh-keygen -Y` has shipped with OpenSSH since 2019 |
 | An agent on every box | `bash` | It's already there. It's always been there |
 
 Dependencies: `git`, `bash`, `jq`, `ssh-keygen`. If your deploy host can run `git push`, it can run Shiplog. If the vendor goes under, your ledger doesn't.
@@ -114,7 +114,7 @@ Shiplog never touches your branches. Everything lives in its own ref namespace:
 | `refs/_shiplog/notes/logs` | Captured output, attached to journal commits as Git notes. |
 | `refs/_shiplog/policy/current` | `policy.json`: author allowlist, per-env signing rules. |
 | `refs/_shiplog/trust/root` | `trust.json` + `allowed_signers`: who the maintainers are and their keys. |
-| `refs/_shiplog/anchors/<env>` | Optional markers ("this is what's live") for replay tooling. |
+| `refs/_shiplog/anchors/<env>` | Optional markers you set ("this is what's live"); each entry records the current one as `previous_anchor`. |
 
 A journal commit looks like this:
 
@@ -163,13 +163,13 @@ Each field resolves env → `git config` → policy document → default; per-en
 **Trust** (`trust.json` + `allowed_signers`) says who the maintainers are, their SSH public keys, and how many of them must approve a change to the roster itself. For N-of-M approval use `sig_mode: attestation`: each maintainer signs a detached SSH attestation over the update. `sig_mode: chain` is a single signed trust commit and supports threshold 1 only.
 
 ```bash
-git shiplog setup --strictness balanced     # guided: open / balanced / strict
+git shiplog setup --strictness balanced     # writes .shiplog/policy.json: open / balanced / strict
 git shiplog policy show --json
 git shiplog policy validate
 git shiplog trust show
 ```
 
-Entries are signed with the SSH key you already use for Git (`SHIPLOG_SIGN=1`). No new PKI, no new accounts, no signing service with a status page.
+Entries are signed with the key Git already signs with (SSH recommended) whenever policy requires it for the environment, or when you set `SHIPLOG_SIGN=1`. No new PKI, no new accounts, no signing service with a status page.
 
 > [!NOTE]
 > **Rebuilt in the audit (see [Dry dock](#dry-dock)):** the *server-side* verification of these rules. Trust changes are verified against the *previous* roster, the N-of-M quorum counts distinct, unrevoked maintainer keys, ref deletion is refused, and when a trust ref exists, policy changes must be signed by a current maintainer. Details: [`docs/TRUST.md`](./docs/TRUST.md).
@@ -259,7 +259,7 @@ make test        # builds the Docker image and runs the whole Bats suite inside 
 ```
 
 > [!WARNING]
-> **Never run Bats directly on your machine.** The suite creates and destroys Git repositories, remotes and refs. It runs in Docker on Debian, Ubuntu, Alpine and Arch so that "works on my machine" is a reproducible claim and not a feeling. See [`AGENTS.md`](./AGENTS.md) and [`test/README.md`](./test/README.md).
+> **Never run Bats directly on your machine.** The suite creates and destroys Git repositories, remotes and refs. `make test` runs it in one Docker container; CI runs it on Debian, Ubuntu, Fedora, Alpine and Arch so that "works on my machine" is a reproducible claim and not a feeling. See [`AGENTS.md`](./AGENTS.md) and [`test/README.md`](./test/README.md).
 
 Plan of record: [`ROADMAP.md`](./ROADMAP.md). Pick an issue from [#155](https://github.com/git-stunts/shiplog/issues/155); each one carries a ready-to-run prompt, the regression tests it must pass, and a recommended model if you're pairing with one. Guidelines: [`CONTRIBUTING.md`](./CONTRIBUTING.md) · [`SECURITY.md`](./SECURITY.md) · [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md).
 
