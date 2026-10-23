@@ -73,3 +73,19 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == "refs/heads/_shiplog" ]]
 }
+
+@test "config never plans sig_mode chain with threshold > 1 (D1; verifier rejects it)" {
+  export SHIPLOG_BORING=1
+  # Default for a self-hosted team of 2-5: attestation, threshold 2.
+  run bash -lc 'SHIPLOG_CONFIG_HOST=self-hosted SHIPLOG_CONFIG_TEAM=2-5 git shiplog config --interactive'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.threshold == 2 and .sig_mode == "attestation"' >/dev/null
+  # Control: solo stays on chain with threshold 1.
+  run bash -lc 'SHIPLOG_CONFIG_HOST=self-hosted SHIPLOG_CONFIG_TEAM=solo git shiplog config --interactive'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.threshold == 1 and .sig_mode == "chain"' >/dev/null
+  # An explicit chain with threshold > 1 is refused, not planned.
+  run bash -lc 'SHIPLOG_CONFIG_HOST=self-hosted SHIPLOG_CONFIG_TEAM=2-5 SHIPLOG_CONFIG_SIGMODE=chain git shiplog config --interactive'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"attestation"* ]]
+}

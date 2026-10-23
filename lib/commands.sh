@@ -2549,7 +2549,8 @@ cmd_config() {
     q_ref_root="$root_ans"
     local team_hint; team_hint=$(shiplog_prompt_choice "Team size" "SHIPLOG_CONFIG_TEAM" solo solo 2-5 6-plus)
     case "$team_hint" in solo) q_threshold=1 ;; 2-5) q_threshold=2 ;; 6-plus) q_threshold=3 ;; esac
-    if [ "$q_threshold" -gt 1 ] && [ "$q_host" != "self-hosted" ]; then q_sig_mode="attestation"; else q_sig_mode="chain"; fi
+    # D1: attestation is the only N-of-M mode; chain supports threshold 1 only.
+    if [ "$q_threshold" -gt 1 ]; then q_sig_mode="attestation"; else q_sig_mode="chain"; fi
     q_sig_mode=$(shiplog_prompt_choice "Signing mode" "SHIPLOG_CONFIG_SIGMODE" "$q_sig_mode" chain attestation)
     q_per_env_signed=$(shiplog_prompt_choice "Require signatures" "SHIPLOG_CONFIG_REQSIG" prod-only prod-only global none)
     q_autopush=$(shiplog_prompt_choice "Auto-push during deploys" "SHIPLOG_CONFIG_AUTOPUSH" disable disable enable)
@@ -2565,9 +2566,13 @@ cmd_config() {
   # sig_mode
   q_sig_mode="${q_sig_mode:-}"
   if [ -z "$q_sig_mode" ]; then
-    if [ "$q_threshold" -gt 1 ] && [ "$q_host" != "self-hosted" ]; then q_sig_mode="attestation"; else q_sig_mode="chain"; fi
+    if [ "$q_threshold" -gt 1 ]; then q_sig_mode="attestation"; else q_sig_mode="chain"; fi
   fi
-  case "$(printf '%s' "$q_sig_mode" | tr '[:upper:]' '[:lower:]')" in chain|attestation) : ;; *) q_sig_mode="chain" ;; esac
+  q_sig_mode="$(printf '%s' "$q_sig_mode" | tr '[:upper:]' '[:lower:]')"
+  case "$q_sig_mode" in chain|attestation) : ;; *) q_sig_mode="chain" ;; esac
+  if [ "$q_sig_mode" = "chain" ] && [ "$q_threshold" -gt 1 ]; then
+    die "shiplog: sig_mode chain supports threshold 1 only (a commit carries one signature); use sig_mode attestation for threshold $q_threshold (docs/TRUST.md)"
+  fi
   # require_signed scope
   q_per_env_signed="$(printf '%s' "${q_per_env_signed:-prod-only}" | tr '[:upper:]' '[:lower:]')"
   local require_signed_global=0 require_signed_prod=0
