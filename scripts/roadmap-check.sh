@@ -103,7 +103,7 @@ chk_count_ge() { # path pattern-or-glob min
   if [ -d "$path" ]; then
     n=$(find "$path" -maxdepth 1 -name "$pat" -type f 2>/dev/null | wc -l | tr -d ' ')
   elif [ -f "$path" ]; then
-    n=$(grep -Ec -- "$pat" "$path" 2>/dev/null || echo 0)
+    n=$(grep -Ec -- "$pat" "$path" 2>/dev/null); n=${n:-0}  # grep -c prints 0 (exit 1) on no match
   else
     echo "missing: $path"; return 1
   fi
@@ -268,6 +268,7 @@ self_test() {
   chk_count_ge "$t/f.txt" 'a' 2 >/dev/null || { echo "self-test: count-ge file"; rc=1; }
   chk_count_ge "$t" '*.json' 2 >/dev/null || { echo "self-test: count-ge dir"; rc=1; }
   chk_count_ge "$t" '*.json' 3 >/dev/null && { echo "self-test: count-ge dir negative"; rc=1; }
+  chk_count_ge "$t/f.txt" 'gamma' 0 >/dev/null || { echo "self-test: count-ge file with zero matches"; rc=1; }
   chk_size_lt "$t/f.txt" 100 >/dev/null || { echo "self-test: size-lt"; rc=1; }
   chk_exec "true" >/dev/null || { echo "self-test: exec"; rc=1; }
   chk_exec "false" >/dev/null && { echo "self-test: exec negative"; rc=1; }
