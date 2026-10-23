@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "require_signed": false,
+  "authors": {
+    "default_allowlist": [
+      "james@flyingrobots.dev",
+      "ci@flyingrobots.dev",
+      "41898282+github-actions[bot]@users.noreply.github.com"
+    ]
+  },
+  "deployment_requirements": {
+    "release": { "require_signed": true }
+  }
+}
