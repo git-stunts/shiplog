@@ -515,3 +515,42 @@ JSON
   # Both entries keep their log on the published notes ref.
   [ "$(git --git-dir="$REMOTE_DIR" ls-tree -r --name-only "$b_notes" | wc -l | tr -d ' ')" -eq 2 ]
 }
+
+# ---------------------------------------------------------------------------
+# #115: the hook protects the notes ref under the root like journals
+# ---------------------------------------------------------------------------
+
+@test "hook refuses deletion and non-fast-forward of the notes ref under the root; a fast-forward passes" {
+  export SHIPLOG_REF_ROOT="$BRANCH_ROOT"
+  install_hook_with_env "$REMOTE_DIR" "SHIPLOG_REF_ROOT=$BRANCH_ROOT"
+  bootstrap_trust_at "$BRANCH_ROOT/trust/root"
+  run git shiplog setup --strictness balanced --authors "$TESTER_EMAIL"
+  [ "$status" -eq 0 ]
+  export SHIPLOG_LOG="$LOG_FILE"
+  run write_entry
+  unset SHIPLOG_LOG
+  [ "$status" -eq 0 ]
+  run git shiplog publish --all --policy --trust
+  echo "publish: $output" >&2
+  [ "$status" -eq 0 ]
+  published=$(git --git-dir="$REMOTE_DIR" rev-parse "$BRANCH_ROOT/notes/logs")
+
+  run git push origin ":$BRANCH_ROOT/notes/logs"
+  echo "delete: $output" >&2
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not permitted"* ]]
+  [ "$(git --git-dir="$REMOTE_DIR" rev-parse "$BRANCH_ROOT/notes/logs")" = "$published" ]
+
+  rewrite=$(git commit-tree "$(git mktree </dev/null)" -m "rewritten notes")
+  run git push --force origin "$rewrite:$BRANCH_ROOT/notes/logs"
+  echo "rewrite: $output" >&2
+  [ "$status" -ne 0 ]
+  [ "$(git --git-dir="$REMOTE_DIR" rev-parse "$BRANCH_ROOT/notes/logs")" = "$published" ]
+
+  # Positive control: appending a note is a fast-forward and is accepted.
+  git notes --ref="$BRANCH_ROOT/notes/logs" add -m "second note" HEAD
+  run git push origin "$BRANCH_ROOT/notes/logs"
+  echo "append: $output" >&2
+  [ "$status" -eq 0 ]
+  [ "$(git --git-dir="$REMOTE_DIR" rev-parse "$BRANCH_ROOT/notes/logs")" = "$(git rev-parse "$BRANCH_ROOT/notes/logs")" ]
+}

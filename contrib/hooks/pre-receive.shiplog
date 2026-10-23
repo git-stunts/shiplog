@@ -197,6 +197,9 @@ TRUST_REF="${SHIPLOG_TRUST_REF:-$REF_ROOT/trust/root}"
 POLICY_REF="${SHIPLOG_POLICY_REF:-$REF_ROOT/policy/current}"
 JOURNAL_PREFIX="$REF_ROOT/journal"
 ANCHORS_PREFIX="$REF_ROOT/anchors"
+# Attached logs (git notes) under the root are append-only like journals:
+# deletion is refused and every update must be a fast-forward.
+NOTES_PREFIX="$REF_ROOT/notes"
 ALLOW_MIXED_REF_ROOT="${SHIPLOG_ALLOW_MIXED_REF_ROOT:-0}"
 
 ref_under_root() {
@@ -214,7 +217,7 @@ if [ "$ALLOW_MIXED_REF_ROOT" != "1" ]; then
 elif ! ref_under_root "$TRUST_REF" || ! ref_under_root "$POLICY_REF"; then
   warn "SHIPLOG_ALLOW_MIXED_REF_ROOT=1: trust ($TRUST_REF) or policy ($POLICY_REF) lives outside the ref root $REF_ROOT"
 fi
-dbg "refs: root=$REF_ROOT trust=$TRUST_REF policy=$POLICY_REF journals=$JOURNAL_PREFIX/* anchors=$ANCHORS_PREFIX/*"
+dbg "refs: root=$REF_ROOT trust=$TRUST_REF policy=$POLICY_REF journals=$JOURNAL_PREFIX/* anchors=$ANCHORS_PREFIX/* notes=$NOTES_PREFIX/*"
 
 if ! command -v "$JQ_BIN" >/dev/null 2>&1; then
   if command -v jq >/dev/null 2>&1; then
@@ -690,7 +693,7 @@ fi
 
 while read -r old_sha new_sha refname; do
   case "$refname" in
-    "$TRUST_REF"|"$POLICY_REF"|"$JOURNAL_PREFIX"/*|"$ANCHORS_PREFIX"/*)
+    "$TRUST_REF"|"$POLICY_REF"|"$JOURNAL_PREFIX"/*|"$ANCHORS_PREFIX"/*|"$NOTES_PREFIX"/*)
       if [ "$new_sha" = "$ZERO_OID" ]; then
         refuse_delete "$refname"
         continue
@@ -713,7 +716,7 @@ while read -r old_sha new_sha refname; do
       env="${refname#"$JOURNAL_PREFIX"/}"
       validate_journal_updates "$env" "$old_sha" "$new_sha"
       ;;
-    "$ANCHORS_PREFIX"/*)
+    "$ANCHORS_PREFIX"/*|"$NOTES_PREFIX"/*)
       ensure_fast_forward "$old_sha" "$new_sha" "$refname"
       ;;
     *)

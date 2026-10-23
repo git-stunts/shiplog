@@ -78,7 +78,7 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
 
 - `SHIPLOG_ALLOW_REF_DELETE` — Hook: when `1`, deleting a Shiplog ref (`git push origin :refs/_shiplog/...`) is permitted and a warning is logged. Default: deletions are refused.
 
-- `SHIPLOG_REF_ROOT` (hook) — The ref root the server enforces. Default `refs/_shiplog`; set it to `refs/heads/_shiplog` when clients use the branch namespace. The hook derives the trust ref (`<root>/trust/root`), the policy ref (`<root>/policy/current`) and the journal/anchors prefixes from it and matches pushed refs by those prefixes, so journals under the configured root are validated whichever layout you chose. The hook is not told the root by the client: it must be exported in the hook environment.
+- `SHIPLOG_REF_ROOT` (hook) — The ref root the server enforces. Default `refs/_shiplog`; set it to `refs/heads/_shiplog` when clients use the branch namespace. The hook derives the trust ref (`<root>/trust/root`), the policy ref (`<root>/policy/current`) and the journal/anchors/notes prefixes from it (notes are append-only: no deletion, fast-forward only) and matches pushed refs by those prefixes, so journals under the configured root are validated whichever layout you chose. The hook is not told the root by the client: it must be exported in the hook environment.
 
 - `SHIPLOG_ALLOW_MIXED_REF_ROOT` — Hook: by default the hook refuses to start when `SHIPLOG_TRUST_REF` or `SHIPLOG_POLICY_REF` points outside `SHIPLOG_REF_ROOT` (a mixed layout usually means journals under the root would go unenforced). Set `1` to accept a mixed layout deliberately; a warning is logged.
 
