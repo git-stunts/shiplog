@@ -184,8 +184,8 @@ SHIPLOG_STATUS_VALUES="success failed in_progress skipped override revert finali
 
 # Top-level trailer keys the writer owns. SHIPLOG_EXTRA_JSON / `append --json`
 # may not set any of them (SLT.BUG.CLI.010); see docs/reference/json-schema.md.
-# `commit` is reserved because export-json adds it at read time.
-SHIPLOG_RESERVED_TRAILER_KEYS="version env ts who what where why how status when seq journal_parent trust_oid previous_anchor repo_head run commit"
+# `commit` and `notes` are reserved because export-json adds them at read time.
+SHIPLOG_RESERVED_TRAILER_KEYS="version env ts who what where why how status when seq journal_parent trust_oid previous_anchor repo_head run commit notes"
 
 # shiplog_extract_trailer < message
 # Prints the JSON trailer of a commit message read from stdin (nothing when no

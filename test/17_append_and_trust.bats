@@ -136,3 +136,13 @@ teardown() {
   [ "$(printf '%s\n' "$output" | jq -r '.what.service')" = "api" ]
   [ "$(printf '%s\n' "$output" | jq -r '.status')" = "success" ]
 }
+
+@test "append rejects the notes key that export-json adds at read time" {
+  local before after
+  before=$(git rev-parse "${REF_ROOT}/journal/prod" 2>/dev/null || true)
+  run bash -c 'git shiplog append --service api --json '\''{"notes":{"attached":true}}'\'''
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'reserved trailer key "notes"'* ]]
+  after=$(git rev-parse "${REF_ROOT}/journal/prod" 2>/dev/null || true)
+  [ "$before" = "$after" ]
+}

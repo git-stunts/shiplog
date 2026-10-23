@@ -82,10 +82,10 @@ This document captures the layout of the JSON trailer that `git shiplog` writes 
 The writer owns these top-level keys:
 
 ```text
-version env ts who what where why how status when seq journal_parent trust_oid previous_anchor repo_head run commit
+version env ts who what where why how status when seq journal_parent trust_oid previous_anchor repo_head run commit notes
 ```
 
-`commit` is reserved because `git shiplog export-json` adds it at read time. The list lives in `SHIPLOG_RESERVED_TRAILER_KEYS` (`lib/git.sh`); update both places together.
+`commit` and `notes` are reserved because `git shiplog export-json` adds them at read time (`notes` is `{ref, attached}`). The list lives in `SHIPLOG_RESERVED_TRAILER_KEYS` (`lib/git.sh`); update both places together.
 
 Rules for extra data (`git shiplog append --json`, `--json-file`, stdin, or the internal `SHIPLOG_EXTRA_JSON`):
 
