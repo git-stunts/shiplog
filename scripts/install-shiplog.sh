@@ -8,6 +8,26 @@ FORCE_CLONE=0
 DRY_RUN=0
 SILENT=0
 SKIP_PROFILE=0
+
+# Every git call below targets INSTALL_DIR explicitly. Drop inherited
+# repository-locating variables (e.g. when run from a Git hook) so that
+# `git -C "$INSTALL_DIR" reset --hard` can never act on some other repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+
+# Shared path guard (also used by scripts/uninstall-shiplog.sh). The installer
+# runs from a checkout, so the guard lives next to it; fail closed if missing.
+INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GUARD_LIB="$INSTALLER_DIR/lib/install-guard.sh"
+if [ -f "$GUARD_LIB" ]; then
+  # shellcheck source=scripts/lib/install-guard.sh
+  . "$GUARD_LIB"
+else
+  echo "install-shiplog: missing $GUARD_LIB (run the installer from a Shiplog checkout)" >&2
+  exit 1
+fi
+SHIPLOG_GUARD_LABEL="shiplog-install"
+
 usage() {
   cat <<'USAGE'
 Shiplog bootstrap installer
@@ -15,12 +35,22 @@ Shiplog bootstrap installer
 Usage: install-shiplog.sh [options]
 
 Options:
-  --force         overwrite existing installation directory
+  --force         replace an existing Shiplog checkout at the install directory
   --profile FILE  shell profile to update (default: auto-detect)
   --dry-run       show what would happen without making changes
   --silent        reduce logging
   --no-profile    do not modify any shell profile (print instructions instead)
   -h, --help      show this help
+
+Environment:
+  SHIPLOG_HOME           install directory (default: $HOME/.shiplog)
+  SHIPLOG_REPO_URL       repository to clone (default: upstream Shiplog)
+  SHIPLOG_ALLOWED_BASES  colon-separated bases the install dir must live under
+                         (default: $HOME:/opt/shiplog)
+
+The installer never resets or removes a directory unless it is strictly inside
+an allowed base, is not a symlink, contains bin/git-shiplog and has
+remote.origin.url pointing at SHIPLOG_REPO_URL.
 USAGE
 }
 
@@ -33,55 +63,6 @@ run() {
     return 0
   fi
   "$@" || return $?
-}
-
-resolve_path() {
-  local raw="$1"
-  [ -n "$raw" ] || return 1
-
-  local path="$raw"
-  case "$path" in
-    ~) path="$HOME" ;;
-    ~/*) path="$HOME/${path#~/}" ;;
-  esac
-
-  if [ "${path#/}" = "$path" ]; then
-    path="$PWD/$path"
-  fi
-
-  local current="/"
-  local suffix="${path#/}"
-  local IFS='/'
-  # shellcheck disable=SC2206
-  local parts=( $suffix )
-  local part candidate
-
-  for part in "${parts[@]}"; do
-    case "$part" in
-      ''|.)
-        continue
-        ;;
-      ..)
-        current="${current%/*}"
-        [ -n "$current" ] || current="/"
-        continue
-        ;;
-    esac
-
-    if [ "$current" = "/" ]; then
-      candidate="/$part"
-    else
-      candidate="$current/$part"
-    fi
-
-    if [ -d "$candidate" ]; then
-      current="$(cd "$candidate" 2>/dev/null && pwd -P)" || return 1
-    else
-      current="$candidate"
-    fi
-  done
-
-  printf '%s' "$current"
 }
 
 while [ $# -gt 0 ]; do
@@ -121,61 +102,33 @@ if [ -z "$PROFILE_FILE" ]; then
   fi
 fi
 
-if [ -z "$INSTALL_DIR" ]; then
-  echo "Error: SHIPLOG_HOME (install directory) must not be empty" >&2
+# Path guard: canonicalize, deny-list, allowed bases, symlink rule. Any
+# refusal exits non-zero, also under --dry-run.
+if ! RESOLVED_INSTALL_DIR=$(shiplog_guard_install_dir "$INSTALL_DIR" path "$REPO_URL"); then
   exit 1
 fi
-
-RESOLVED_INSTALL_DIR=$(resolve_path "$INSTALL_DIR")
-if [ -z "$RESOLVED_INSTALL_DIR" ]; then
-  echo "Error: unable to resolve install path '$INSTALL_DIR'" >&2
-  exit 1
-fi
-
-case "$RESOLVED_INSTALL_DIR" in
-  /|/root|/root/*)
-    echo "Error: refusing to install into $RESOLVED_INSTALL_DIR" >&2
-    exit 1
-    ;;
-esac
-
-ALLOWED_BASES=${SHIPLOG_ALLOWED_BASES:-$HOME:/opt/shiplog}
-IFS=':' read -r -a _shiplog_allowed <<< "$ALLOWED_BASES"
-allowed_ok=0
-for base in "${_shiplog_allowed[@]}"; do
-  [ -z "$base" ] && continue
-  resolved_base=$(resolve_path "$base" 2>/dev/null || true)
-  [ -z "$resolved_base" ] && continue
-  case "$RESOLVED_INSTALL_DIR" in
-    "$resolved_base"|"$resolved_base"/*)
-      allowed_ok=1
-      break
-      ;;
-  esac
-done
-unset _shiplog_allowed
-
-if [ "$allowed_ok" -ne 1 ]; then
-  echo "Error: install directory $RESOLVED_INSTALL_DIR is outside permitted bases ($ALLOWED_BASES)" >&2
-  exit 1
-fi
-
 INSTALL_DIR="$RESOLVED_INSTALL_DIR"
 log "Install dir: $INSTALL_DIR"
-if [ -d "$INSTALL_DIR" ]; then
+
+if [ -e "$INSTALL_DIR" ]; then
+  if [ ! -d "$INSTALL_DIR" ]; then
+    echo "Error: $INSTALL_DIR exists and is not a directory" >&2
+    exit 1
+  fi
+  # Destructive operations (rm -rf, reset --hard) require evidence that the
+  # directory is a Shiplog checkout: bin/git-shiplog plus a matching origin URL.
+  if ! shiplog_guard_install_dir "$INSTALL_DIR" destructive "$REPO_URL" >/dev/null; then
+    echo "Error: refusing to modify $INSTALL_DIR (not a Shiplog checkout cloned from $REPO_URL)." >&2
+    echo "       Point SHIPLOG_HOME at an empty path or remove the directory manually." >&2
+    exit 1
+  fi
   if [ "$FORCE_CLONE" -eq 1 ]; then
-    if [ -L "$INSTALL_DIR" ]; then
-      echo "Error: refusing to remove symlinked install dir ($INSTALL_DIR). Remove it manually first." >&2
-      exit 1
-    fi
-    log "Removing existing directory"
+    log "Removing existing Shiplog checkout"
     run rm -rf "$INSTALL_DIR"
+    log "Cloning repo from $REPO_URL"
+    run git clone "$REPO_URL" "$INSTALL_DIR"
   else
     log "Directory already exists; pulling latest"
-    if ! git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      echo "Error: $INSTALL_DIR exists but is not a git repository (use --force to replace it)" >&2
-      exit 1
-    fi
     default_branch=$(git -C "$INSTALL_DIR" remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}')
     if [ -z "$default_branch" ]; then
       for candidate in main master; do
@@ -213,7 +166,9 @@ if [ "$DRY_RUN" -eq 0 ]; then
     echo "Error: install-shiplog-deps.sh is a symlink - security risk" >&2
     exit 1
   fi
-  (cd "$INSTALL_DIR" && ./install-shiplog-deps.sh ${SILENT:+--silent})
+  deps_args=()
+  [ "$SILENT" -eq 1 ] && deps_args+=(--silent)
+  (cd "$INSTALL_DIR" && ./install-shiplog-deps.sh ${deps_args[@]+"${deps_args[@]}"})
   if [ -x "$INSTALL_DIR/scripts/bosun" ]; then
     log "Linking bosun helper into bin/"
     mkdir -p "$INSTALL_DIR/bin"
@@ -241,8 +196,8 @@ HOME_LINE="export SHIPLOG_HOME=\"$INSTALL_DIR\""
 PROFILE_UPDATED=0
 
 if [ "$SKIP_PROFILE" -eq 0 ] && [ -n "$PROFILE_FILE" ]; then
-  touch "$PROFILE_FILE"
   if [ "$DRY_RUN" -eq 0 ]; then
+    touch "$PROFILE_FILE"
     if [ ! -f "$PROFILE_FILE.bak" ]; then
       log "Creating backup $PROFILE_FILE.bak"
       cp "$PROFILE_FILE" "$PROFILE_FILE.bak"

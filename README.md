@@ -133,27 +133,29 @@ Shiplog stores all its data in lightweight Git refs, separate from your main cod
 - **Trust**: `refs/_shiplog/trust/root` (Root of the trusted signers/keys)
 - **Notes**: Attachments (e.g., logs) under `refs/_shiplog/notes/logs` are associated with journal entries.
 
+All of them hang off one ref root (`refs/_shiplog` by default). `SHIPLOG_REF_ROOT` or `git config shiplog.refRoot` moves every ref together (e.g. to the branch namespace `refs/heads/_shiplog`), on the client and in the server hook; `git shiplog refs root show` prints the effective root and its source.
+
 Policy resolution merges CLI/env overrides, local repo config, the policy ref, and working fallbacks. See [`docs/features/policy.md`](./docs/features/policy.md).
 
 ---
 
 ## Multi-Sig Trust Modes
 
-Choose how maintainer approval is expressed. Both are supported.
+Choose how maintainer approval is expressed. Every trust update is verified against the **prior** roster, and the quorum counts **distinct, unrevoked maintainer keys** (decision D1 in `ROADMAP.md`).
 
-### 1. Chain (`sig_mode=chain`)
+### 1. Attestation (`sig_mode=attestation`) — the N-of-M mode
 
-- Maintainers co-sign trust commits. The policy requires a threshold of distinct signers over the same trust tree.
-- **Pros**: Fully Git-native, excellent audit trail.
-- **Cons**: Maintainers must sign trust commits (often via a dedicated workflow).
+- Each maintainer signs a canonical payload (base tree OID + trust id + threshold) with `ssh-keygen -Y sign`; the `.sig` files travel in the trust tree and are verified with `ssh-keygen -Y find-principals` / `-Y verify`.
+- **Pros**: Real N-of-M approval; easy to automate with SSH keys/CI.
+- **Cons**: Requires collecting `.sig` files before the push (`scripts/shiplog-trust-sign.sh`).
 
-### 2. Attestation (`sig_mode=attestation`)
+### 2. Chain (`sig_mode=chain`) — threshold 1 only
 
-- Maintainers sign a canonical payload (tree OID + context); verified via `ssh-keygen -Y verify`.
-- **Pros**: Flexible; easier to automate with SSH keys/CI.
-- **Cons**: Requires additional artifact handling; precise canonicalization matters.
+- The signed trust commit itself is the approval; a Git commit carries exactly one signature, so chain mode cannot express N-of-M and the server rejects `threshold > 1` in this mode.
+- **Pros**: Fully Git-native; nothing beyond a signed commit.
+- **Cons**: Single-approver only.
 
-**Fast Pick**: Use chain if your maintainers are comfortable signing commits. Use attestation when signatures primarily come from automation or dedicated SSH keys.
+**Fast Pick**: Use attestation whenever more than one maintainer must approve. Use chain for a single trusted maintainer.
 
 > [!important]  
 > See [`docs/TRUST.md`](./docs/TRUST.md) for bootstrapping and verifier details.
@@ -175,7 +177,7 @@ Choose how maintainer approval is expressed. Both are supported.
 
 - Journals (append-only by env) with human + JSON views.
 - Policy/trust refs; allow lists by env; threshold verification.
-- Two trust modes (chain, attestation) + shared verifier script.
+- One trust verification module (`lib/trust-verify.sh`) shared by the hook and the CI verifier: prior-roster verification, key-based N-of-M attestations, refused deletions, signed policy updates.
 - Core commands: `run`, `write`, `append`, `ls`, `show`, `export-json`, `publish`.
 - Hosting docs: GitHub SaaS guidance and self-hosted hooks; enforcement matrix.
 - Dockerized cross-distro tests and CI linting/validation.
@@ -205,7 +207,7 @@ Choose how maintainer approval is expressed. Both are supported.
 |----------|--------|
 | What is AJV and why does CI mention it? | AJV is a fast JSON Schema validator for Node.js. CI uses it to validate `examples/policy.json`, the fixtures under `test/fixtures/policy/valid/`, and `.shiplog/policy.json` when present against `examples/policy.schema.json`, and asserts that the fixtures under `test/fixtures/policy/invalid/` are rejected. Locally, `git shiplog policy validate` performs `jq` checks. |
 |Can Shiplog enforce policy on GitHub.com (SaaS)? | Yes, but via **Branch/Push Rulesets + Required Checks** and a branch namespace for Shiplog refs, as SaaS doesn't run custom server hooks. |
-| Which trust mode should I use? | **Chain** if maintainers can sign commits; **attestation** if signatures come from automation/SSH. Both are fully supported. |
+| Which trust mode should I use? | **Attestation** whenever more than one maintainer must approve (it is the only N-of-M mode). **Chain** means one signed trust commit and supports threshold 1 only. |
 
 ## License
 

@@ -1,260 +1,276 @@
 # Trust Bootstrap and Enforcement
 
-Shiplog keeps the signer roster and policy under signed Git references so every promotion is auditable.
-This guide explains the one-time bootstrap, how to mirror trust material, and how to keep local
-installations in sync.
+Shiplog keeps the signer roster and policy under Git references so every promotion is auditable.
+This guide explains the one-time bootstrap, the rules the server applies to every later update,
+how to mirror trust material, and how to keep local installations in sync.
+
+## The rules in one paragraph
+
+The trust ref (`refs/_shiplog/trust/root`) holds `trust.json` (threshold, maintainers, `sig_mode`)
+and `allowed_signers` (principal → SSH public key). **The current roster approves the next roster:**
+every update after genesis is verified against the roster stored at the *previous* tip, never against
+the content being pushed. The quorum counts **distinct, unrevoked maintainer keys** — a signature is
+bound to a public key (`ssh-keygen -Y find-principals`), the key to a roster principal, and the
+principal to a `trust.json` maintainer with `revoked != true`. Filenames, author e-mails and wildcard
+principals never count. `sig_mode=attestation` is the only N-of-M mode; `sig_mode=chain` means one
+signed trust commit and supports threshold 1 only (decision D1, ROADMAP.md). Deleting a Shiplog ref is
+refused. Policy updates must be signed by a current maintainer once a trust ref exists.
+
+One module implements these rules — `lib/trust-verify.sh` — and both enforcement points source it:
+the pre-receive hook (`contrib/hooks/pre-receive.shiplog`) and the CI verifier
+(`scripts/shiplog-verify-trust.sh`). The adversarial suite `test/27_trust_adversarial.bats` is the
+executable specification.
 
 ## jq Requirement
 
-All trust and policy validation uses `/usr/local/bin/jq` pinned to version `1.7.1`. Containers, CI, and server hooks should install exactly that build (with checksum verification). Running hooks outside the container must use the same version to avoid schema drift.
-
-```bash
-# Dockerfile snippet
-ARG JQ_VERSION=1.7.1
-curl -fsSL -o /usr/local/bin/jq \
-  "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64"
-echo "b21d1a42bfcab948e76f22aa8775d1d86c98cd63f6395f9a9eeb0d4f58af0a4c  /usr/local/bin/jq" \
-  | sha256sum -c -
-chmod +x /usr/local/bin/jq
-/usr/local/bin/jq --version
-```
+All trust and policy validation uses `jq` (1.6+; the hook prefers `/usr/local/bin/jq`, then `jq` on
+`PATH`, or `SHIPLOG_JQ_BIN`). Containers, CI and server hooks should install the same build.
 
 ## One-Time Trust Bootstrap
 
-Bootstrap is the only moment you may bypass quorum checks. After the initial push, every update to `refs/_shiplog/trust/root` must be fast-forward and co-signed by the current threshold of maintainers.
+Genesis is the only update verified against its own content. Protect it: the server must not have
+the ref yet (the hook refuses deletions, so a published trust root cannot be reset by a pusher), and
+the pusher should be a server admin. After genesis, every update must be fast-forward and approved by
+the quorum of the *prior* roster.
 
 ### Fast Path: `scripts/shiplog-bootstrap-trust.sh`
 
-Run the helper to collect maintainer metadata, generate `.shiplog/trust.json` and `.shiplog/allowed_signers`, create the signed genesis commit, and optionally push it to origin:
-
 ```bash
-./scripts/shiplog-bootstrap-trust.sh           # prompts for maintainer roster and SSH keys
-./scripts/shiplog-bootstrap-trust.sh --no-push # prepare locally, push later
+./scripts/shiplog-bootstrap-trust.sh                               # interactive
+./scripts/shiplog-bootstrap-trust.sh --no-push                     # prepare locally, push later
+./scripts/shiplog-bootstrap-trust.sh --trust-sig-mode attestation --trust-threshold 2 \
+  --trust-maintainer "name=Alice,email=alice@example.com,key=/path/alice.pub" \
+  --trust-maintainer "name=Bob,email=bob@example.com,key=/path/bob.pub" --no-push
 ```
 
 The script will:
 
-1. Prompt for maintainer names, emails, roles, optional OpenPGP fingerprints, and SSH public keys.
-2. Build a JSON manifest with the chosen signature threshold.
-3. Write `.shiplog/trust.json` and `.shiplog/allowed_signers` (backing up existing files unless `--force`).
-4. Create and sign the genesis commit for `refs/_shiplog/trust/root`.
-5. Offer to push the new ref to `origin`.
+1. Collect maintainer names, e-mails, roles, optional OpenPGP fingerprints and SSH public keys.
+2. Write `.shiplog/trust.json` (valid JSON, `sig_mode` lowercased) and `.shiplog/allowed_signers`.
+3. **Sign the genesis commit by default when `git config user.signingkey` is set.** Without a key it
+   prints a hint and creates an unsigned commit. `SHIPLOG_SIGN_TRUST=1|0` overrides
+   (`SHIPLOG_TRUST_SIGN` is a deprecated alias).
+4. In attestation mode, write the bootstrapping maintainer's attestation to
+   `.shiplog/trust_sigs/<principal>.sig` when the configured SSH signing key (`gpg.format ssh`)
+   matches one of the roster keys. A threshold above 1 needs more attestations before the push:
+   each extra maintainer runs `scripts/shiplog-trust-sign.sh` and the `.sig` files are committed.
+5. Offer to push the ref to the configured remote.
 
-After the script completes (and you push the ref, if desired), distribute the roster with `./scripts/shiplog-trust-sync.sh` so every workstation and CI runner receives the generated `allowed_signers` file.
+Distribute the roster afterwards with `./scripts/shiplog-trust-sync.sh`.
 
-### Manual Bootstrap (detailed)
+### Manual Bootstrap
 
 ```bash
-# 0) Prepare trust material (ideally on an offline machine)
 cat > .shiplog/trust.json <<'JSON'
-{ "version": 1, "id": "shiplog-trust-root", "threshold": 2,
+{ "version": 1, "id": "shiplog-trust-root", "sig_mode": "attestation", "threshold": 2,
   "maintainers": [
-    {"name": "Alice", "email": "alice@example.com", "pgp_fpr": "AAAA...1111", "role": "root", "revoked": false},
-    {"name": "Bob",   "email": "bob@example.com",   "pgp_fpr": "BBBB...2222", "role": "root", "revoked": false}
+    {"name": "Alice", "email": "alice@example.com", "pgp_fpr": null, "role": "root", "revoked": false},
+    {"name": "Bob",   "email": "bob@example.com",   "pgp_fpr": null, "role": "root", "revoked": false}
   ]
 }
 JSON
 cat > .shiplog/allowed_signers <<'SIGS'
-alice@example.com AAAAC3Nz...alice-key...
-bob@example.com   AAAAC3Nz...bob-key...
+alice@example.com ssh-ed25519 AAAAC3Nz...alice-key...
+bob@example.com   ssh-ed25519 AAAAC3Nz...bob-key...
 SIGS
 
-# 1) Write a tree with the trust artifacts
 OID_TRUST=$(git hash-object -w .shiplog/trust.json)
 OID_SIGS=$(git hash-object -w .shiplog/allowed_signers)
-TREE=$(printf "100644 blob %s\ttrust.json\n100644 blob %s\tallowed_signers\n" "$OID_TRUST" "$OID_SIGS" | git mktree)
-
-# 2) Create the genesis commit (each maintainer signs the same tree)
-GENESIS=$(echo "shiplog: trust root v1 (GENESIS)" |
-  GIT_AUTHOR_NAME="Trust Init" GIT_AUTHOR_EMAIL="trust@local" \
-  git commit-tree "$TREE" -S)
-
-# 3) Install the ref (server allows this only when the ref is absent)
+BASE=$(printf "100644 blob %s\ttrust.json\n100644 blob %s\tallowed_signers\n" "$OID_TRUST" "$OID_SIGS" | git mktree)
+# Commit the base tree first so each maintainer can attest it:
+TMP=$(git commit-tree "$BASE" -m "shiplog: trust root (base)")
+scripts/shiplog-trust-sign.sh --principal alice@example.com "$TMP"   # Alice, with her key
+scripts/shiplog-trust-sign.sh --principal bob@example.com   "$TMP"   # Bob, with his key
+# Then commit trust.json + allowed_signers + .shiplog/trust_sigs/*.sig together, signed:
+GENESIS=$(git commit-tree <tree with the .sig files> -S -m "shiplog: trust root v1 (GENESIS)")
 git update-ref refs/_shiplog/trust/root "$GENESIS"
 git push origin refs/_shiplog/trust/root
 ```
 
-After bootstrap, the server hook must reject any trust update that is not a fast-forward or lacks the required number of maintainer signatures. Document this expectation in your repo policies so nobody attempts another bypass.
-
 ## Signing Modes (sig_mode)
 
-Shiplog supports two ways to meet a threshold of maintainer signatures on trust updates. The active mode is declared in `.shiplog/trust.json` as `sig_mode`:
+`trust.json.sig_mode` selects how the quorum is expressed:
 
-- `chain`: A co‑sign chain of commits. Each maintainer creates a commit over the exact same trust tree (no content change). Threshold is met when at least `threshold` distinct maintainer‑signed commits are present in a fast‑forward update.
-- `attestation`: Detached signatures (attestations) are stored under `.shiplog/trust_sigs/` alongside the trust tree. Threshold is met when at least `threshold` valid attestations over the trust tree are present.
+- `attestation` (recommended; **the only N-of-M mode**): each maintainer stores a detached SSH
+  signature under `.shiplog/trust_sigs/<principal>.sig`. The update is accepted when at least
+  `threshold` attestations verify over the canonical payload and come from distinct, unrevoked
+  maintainer keys of the prior roster.
+- `chain` (default when absent; threshold 1 only): the trust commit itself is the approval. A rotation
+  is accepted when the commit carries a valid signature from a key that maps to an unrevoked
+  maintainer of the prior roster. Chain mode with `threshold > 1` is rejected with a message pointing
+  to attestation mode, because a Git commit carries exactly one signature and co-sign chains cannot
+  bind N signatures to N keys.
 
-Choose a mode during bootstrap:
+### Attestations: payload, creation, verification
 
-```bash
-./scripts/shiplog-bootstrap-trust.sh --trust-sig-mode chain
-./scripts/shiplog-bootstrap-trust.sh --trust-sig-mode attestation
+The canonical payload is built by `trust_verify_payload` in `lib/trust-verify.sh` and nowhere else:
+
+```
+shiplog-trust-tree-v2
+<base_tree_oid>
+<trust_id>
+<threshold>
+<prior_oid>
 ```
 
-Or set an environment variable for non‑interactive runs:
+`<base_tree_oid>` is the tree holding only `trust.json` and `allowed_signers` of the commit being
+pushed (never the `trust_sigs` directory), `<trust_id>` is `trust.json.id` and `<threshold>` is
+`trust.json.threshold` of that same commit. `<prior_oid>` is the trust commit this update replaces
+(the server's current tip; 40 zeros at genesis). Signatures use the `shiplog-trust` namespace.
+
+An attestation therefore approves one transition, not a document: it cannot be copied onto another
+history to restore an earlier roster (for example, to bring back a removed maintainer). `v1`
+payloads, which lacked `<prior_oid>`, are not accepted.
 
 ```bash
-export SHIPLOG_TRUST_SIG_MODE=attestation
+scripts/shiplog-trust-sign.sh --message-only <commit>                 # print the exact payload
+scripts/shiplog-trust-sign.sh --principal you@example.com <commit>    # write .shiplog/trust_sigs/you@example.com.sig
+scripts/shiplog-trust-sign.sh --parent <current-tip> <commit>         # explicit prior (default: local trust ref tip)
 ```
 
-Verification:
-- Self‑hosted: the pre‑receive hook runs a shared verifier (`scripts/shiplog-verify-trust.sh`).
-- SaaS (GitHub.com, GitLab SaaS, Bitbucket Cloud): use branch namespace `_shiplog/**` and a Required Status Check that runs the same verifier.
+Fetch the trust ref before attesting a rotation: the default `<prior_oid>` is your local
+`refs/_shiplog/trust/root`, and an attestation made against a stale tip is rejected.
 
-Notes:
-- Chain mode is pure Git and simple to enforce in hooks.
-- Attestation mode pairs well with PRs (single commit + signature files) and SaaS required checks.
-- Both modes sign the trust tree OID; replay protection comes from verifying the signed OID equals the tree in the pushed commit range and FF‑only.
+Verification of each `.sig`:
 
-For a guided choice, see docs/features/setup.md. An interactive questionnaire is planned (see docs/tasks/backlog/SLT.BETA.020_setup_questionnaire.md) and will surface these choices with host‑aware recommendations.
+1. `ssh-keygen -Y find-principals -s <sig> -f <prior allowed_signers>` binds the signature to a roster
+   key and its principal(s). A `.sig` made by a key outside the prior roster is ignored.
+2. Wildcard principals (`*`, `*@example.com`, `?`) are ignored: they cannot be bound to a maintainer.
+   Do not use wildcard lines in a trust roster.
+3. The principal must match a `trust.json` maintainer (`email` or `principal`) with `revoked != true`.
+4. `ssh-keygen -Y verify -n shiplog-trust -I <principal>` must succeed over the payload.
+5. The key fingerprint is recorded; the same key under two names counts once.
 
-### Attestations: Creating and Verifying Signatures
+The legacy `SHIPLOG_ATTEST_PAYLOAD_MODE=full` and `SHIPLOG_ATTEST_BACKCOMP` options are gone: a
+signature over the full commit tree can never match once a `.sig` file is part of that tree.
 
-- Canonical payload signed by each maintainer (SSH):
-  ```
-  shiplog-trust-tree-v1
-  <base_tree_oid>
-  <trust_id>
-  <threshold>
-  ```
-  where `<base_tree_oid>` is the tree built from `trust.json` and `allowed_signers` only (not including the `trust_sigs` directory). This avoids a circular dependency and produces deterministic payloads.
+## Trust-Commit Signature Gate (Server Hook)
 
-  Back‑compatibility:
-  - Set `SHIPLOG_ATTEST_BACKCOMP=1` to accept legacy payloads that signed the full commit tree OID.
-  - To force a specific mode, set `SHIPLOG_ATTEST_PAYLOAD_MODE=base|full` (`base` recommended).
-- Helper to create signatures:
-  ```bash
-  scripts/shiplog-trust-sign.sh --principal you@example.com   # writes .shiplog/trust_sigs/you@example.com.sig
-  ```
-- Verifier (hooks and CI) checks that at least `threshold` distinct principals produce valid signatures over the payload using the `allowed_signers` roster.
+`SHIPLOG_REQUIRE_SIGNED_TRUST` controls **one thing**: whether the trust commit itself must carry a
+valid signature from a current (prior-roster) maintainer. It never replaces the quorum.
+
+- Default `0`: the commit signature is not required (in chain mode a rotation still needs the
+  maintainer signature, because that signature *is* the quorum; only a chain-mode genesis may be
+  unsigned).
+- Recommended for production: `1`. Values are case-insensitive (`1|true|yes|on`).
+- `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE` is **ignored** (a warning is printed). The `either` shortcut,
+  which let one commit signature waive the attestation quorum, has been removed (#113).
+- `SHIPLOG_ALLOW_TRUST_THRESHOLD_UNENFORCED=1` is the only escape hatch. It skips the quorum and
+  prints a loud warning on every push; use it for staged migrations only.
+
+## Policy Ref Authentication
+
+Once a trust ref exists on the server, every update to `refs/_shiplog/policy/current` must:
+
+- contain `.shiplog/policy.json` (an empty or foreign tree is rejected, naming the path);
+- pass the policy validator (`scripts/policy/validate.sh` / `scripts/lib/policy_validate.jq`);
+- carry a valid signature whose key maps to an unrevoked maintainer of the current trust roster
+  (SSH keys via the roster principal, OpenPGP keys via `maintainers[].pgp_fpr`).
+
+`SHIPLOG_REQUIRE_SIGNED_POLICY` overrides the default (`1` when a trust ref exists, `0` otherwise) so a
+fresh server can receive its first policy before trust is pushed. Bootstrap order: trust first, then
+policy. Sign policy commits with `SHIPLOG_POLICY_SIGN=1 scripts/shiplog-sync-policy.sh`.
+
+## Deletions and server configuration
+
+The hook refuses `git push origin :refs/_shiplog/...` for the trust ref, the policy ref, journals and
+anchors. A deleted ref would turn the next push into a "genesis" and let anyone rewrite history.
+`SHIPLOG_ALLOW_REF_DELETE=1` in the hook environment permits deletion for emergency recovery and logs a
+warning. Add defense in depth on the bare repository:
+
+```bash
+git --git-dir=/srv/git/your.git config receive.denyDeletes true
+git --git-dir=/srv/git/your.git config receive.denyNonFastForwards true
+```
+
+## Installing the hook on a server
+
+The hook is one file, but it sources `lib/trust-verify.sh` and runs `scripts/shiplog-verify-trust.sh`
+and `scripts/policy/validate.sh` from a Shiplog checkout it trusts. Install a checkout owned by the git
+user, not writable by the group or others, and point the hook at it:
+
+```bash
+sudo -u git git clone https://github.com/git-stunts/shiplog /srv/shiplog
+sudo -u git chmod -R go-w /srv/shiplog
+sudo -u git cp /srv/shiplog/contrib/hooks/pre-receive.shiplog /srv/git/your.git/hooks/pre-receive
+sudo -u git chmod 0755 /srv/git/your.git/hooks/pre-receive
+# hook environment (how depends on your git server; a wrapper that exports these works everywhere)
+SHIPLOG_HOME=/srv/shiplog
+SHIPLOG_REQUIRE_SIGNED_TRUST=1
+```
+
+Discovery rules (fail closed): the hook sources `$SHIPLOG_HOME/lib/trust-verify.sh` (or
+`SHIPLOG_TRUST_VERIFY_LIB`) and runs `$SHIPLOG_HOME/scripts/shiplog-verify-trust.sh` (or
+`SHIPLOG_VERIFY_TRUST_BIN`). Only files under `SHIPLOG_HOME`, the hooks directory or the repository
+directory are accepted, and never files that are group/world writable. The parent of the repository
+directory is not trusted. The hook exports an absolute `GIT_DIR` before running anything, so the
+verifier works from a bare repository. Without a module the hook refuses every push with a message
+naming `SHIPLOG_HOME`.
 
 ## Keeping Clients in Sync
 
-Use the helper script to materialize the allowed signers from the trust ref and teach Git where to find it. This avoids copying unsigned files or relying on repository checkout state.
-
 ```bash
-./scripts/shiplog-trust-sync.sh                    # defaults to refs/_shiplog/trust/root → .shiplog/allowed_signers
+./scripts/shiplog-trust-sync.sh                    # refs/_shiplog/trust/root → .shiplog/allowed_signers
 ./scripts/shiplog-trust-sync.sh refs/_shiplog/trust/root ~/.config/shiplog/allowed_signers
 ```
 
-The script fetches the latest trust ref (you still need `git fetch` beforehand), reads `allowed_signers` from the signed commit, writes it to the chosen destination, and sets `gpg.ssh.allowedSignersFile` to point at that file.
-
-## Trust‑Commit Signature Gate (Server Hook)
-
-The pre‑receive hook can require the trust commit itself to be signed (separately from meeting the maintainer threshold). Control this with `SHIPLOG_REQUIRE_SIGNED_TRUST` in the hook environment.
-
-- Default: `0` (do not require the trust commit itself to be signed). This keeps local/dev flows and CI tests simple.
-- Recommended for production: `1` (require a valid Git signature on the trust commit).
-- Case‑insensitive: values like `1|true|yes|on` enable; `0|false|no|off` disable.
-
-Example (bare repo on a self‑hosted server):
-
-```
-sudo -u git sh -c 'echo SHIPLOG_REQUIRE_SIGNED_TRUST=1 >> repos/your.git/hooks/env'
-# ensure hooks read this env (e.g., `set -a; . hooks/env; set +a` in your hook wrapper)
-```
-
-Notes:
-- The threshold verification (chain/attestation) is independent of this gate.
-- On SaaS, you cannot enforce this at push time; include signature checks in your Required Status Check.
-
-### Gate Modes
-
-Set `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE` to control how the gate is satisfied when `SHIPLOG_REQUIRE_SIGNED_TRUST` is enabled:
-
-- `commit` (default): require the trust commit itself to pass `git verify-commit`.
-- `attestation`: require the attestation threshold to verify (detached signatures under `.shiplog/trust_sigs/`).
-- `either`: accept if either the commit signature verifies or the attestation threshold verifies. Useful to smooth over distro‑specific SSH principal quirks while you harden your roster and CI.
+The script reads `allowed_signers` from the trust tip, writes it to the destination and sets
+`gpg.ssh.allowedSignersFile` to the **absolute** path, so `git verify-commit` works from any directory.
 
 ## Server Enforcement Checklist
-
-## Trust Modes Diagram
 
 ![Trust Modes](img/trust-modes.svg)
 
 *Source: [trust-modes.mmd](img/trust-modes.mmd)*
 
-
-* Fail fast when the trust ref or `trust.json` is missing (`❌ SHIPLOG: trust ref missing`).
-* Validate trust.json and policy.json with the pinned jq.
-* Enforce `sig_mode`:
-  * chain: trust update must include ≥ threshold maintainer‑signed commits over the exact same tree (FF‑only).
-  * attestation: trust commit must include ≥ threshold valid attestations over the tree.
-* Require the trust commit to be signature‑verified when `SHIPLOG_REQUIRE_SIGNED_TRUST` is enabled.
-* Require policy updates to be signed by a maintainer listed in `trust.json` and keep them fast-forward.
-* When journal entries arrive:
-  * Enforce fast-forward pushes.
-  * Verify commit signatures against the signer roster from the trust ref.
-  * Parse the JSON trailer to ensure `trust_oid`, `journal_parent`, `seq`, and required WWWWWH fields
-    match policy.
-  * Compare `trust_oid` to the current server trust tip to prevent stale-trust replays.
+* Fail closed when the trust ref, `trust.json`, `allowed_signers` or the shared module is missing.
+* Verify every non-genesis trust update against the prior roster; refuse non-fast-forward updates.
+* Count distinct unrevoked maintainer keys; chain mode is threshold 1 only.
+* Require the trust commit itself to be signed when `SHIPLOG_REQUIRE_SIGNED_TRUST=1`.
+* Require policy updates to be signed by a current maintainer and to contain a valid `policy.json`.
+* Refuse deletions; set `receive.denyDeletes` and `receive.denyNonFastForwards` as well.
+* For journal entries: fast-forward only, signature verified against the roster from the trust ref
+  (`git -c gpg.ssh.allowedSignersFile=<roster> verify-commit`), trailer fields and `trust_oid` checked.
 * Mirror `refs/_shiplog/{trust,policy,journal}` to a second remote or WORM storage for recovery.
 
 ## Troubleshooting Verification
 
-Enable verbose diagnostics from the verifier and hooks by exporting `SHIPLOG_DEBUG_SSH_VERIFY=1` in the server hook environment (self‑hosted) or the CI job (SaaS). The debug output includes:
+Export `SHIPLOG_DEBUG_SSH_VERIFY=1` in the hook environment (self-hosted) or the CI job. The debug
+output names the module and verifier paths in use, the roster commit used for the quorum, the
+principals found in `allowed_signers`, the payload tree OID and SHA-256, the maintainer each signature
+was bound to (or why it was ignored: not a roster key, wildcard principal, revoked, duplicate key), and
+the `git verify-commit` output on failure.
 
-- Gate status (enabled/disabled), gate mode, and `gpg.format` in effect.
-- Presence of `allowed_signers` and the principals discovered there.
-- For commit‑signature checks, the `git log --show-signature` block when verification fails.
-- For attestation checks, the number of `.shiplog/trust_sigs/*` files found, the canonical payload tree OID used for verification, and per‑signature verification results from `ssh-keygen -Y verify`.
+Common rejections:
 
-If you encounter principal mismatches across distros, prefer `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=either` temporarily and ensure your `allowed_signers` contains both the exact maintainer email and a domain wildcard (e.g., `*@example.com`) for the relevant key. Then tighten to `commit` or `attestation` as your fleet converges.
+- `is not signed by a current maintainer` — the signing key is not in the *prior* roster, its principal
+  is a wildcard, or the maintainer is revoked.
+- `verified N distinct maintainer attestation(s); threshold is T` — too few valid `.sig` files from
+  distinct keys. Check that each maintainer signed the payload of the commit being pushed
+  (`scripts/shiplog-trust-sign.sh --message-only <commit>`).
+- `sig_mode=chain supports threshold 1 only` — switch the roster to `sig_mode=attestation`.
+- `shared trust verification module lib/trust-verify.sh not found` — set `SHIPLOG_HOME`.
 
 ## Solo Maintainer Trust Setup
 
-When you are the only maintainer, avoid a single point of failure by creating multiple, independent signing identities that you control and using a threshold greater than 1:
-
-- Primary SSH signing key on your laptop (passphrase‑protected).
-- Hardware token SSH signing key (e.g., YubiKey) as a second factor.
-- CI SSH signing key stored in a protected GitHub Environment as a third identity.
-
-Set `threshold` to 2 (2‑of‑3). This allows signing in CI even if your laptop is offline, and vice versa, and enables quick rotation if a key is compromised.
-
-Example maintainer entries in `trust.json`:
-
-```
-{
-  "version": 1,
-  "id": "shiplog-trust-root",
-  "threshold": 2,
-  "maintainers": [
-    { "name": "Maintainer", "email": "you@example.com", "pgp_fpr": "<40-hex or null>", "role": "root", "revoked": false },
-    { "name": "CI",         "email": "ci@example.com",  "pgp_fpr": null,           "role": "root", "revoked": false },
-    { "name": "YubiKey",    "email": "you@example.com", "pgp_fpr": null,           "role": "root", "revoked": false }
-  ]
-}
-```
-
-The corresponding `allowed_signers` should include one line per SSH key (principal + key).
-
-Notes:
-- Use real, monitored email addresses. Avoid placeholders.
-- Prefer SSH signing for CI and hardware tokens. Provide a PGP fingerprint only when you actually use PGP to sign.
-- Document where these keys live, how to unlock them, and who is allowed to rotate them.
+When you are the only maintainer, create several independent SSH signing identities (laptop key,
+hardware token, CI key) and set `threshold` to 2 with `sig_mode=attestation`. Each identity gets its
+own `allowed_signers` line with a distinct principal and a matching `trust.json` maintainer entry.
+Use real principals; wildcards are never counted.
 
 ## Emergency Recovery
 
-If you lose access to one or more keys or need to rotate quickly:
+- Add or remove a maintainer, change the threshold: edit `trust.json` and `allowed_signers`, commit as
+  a fast-forward child, collect `threshold` attestations from the *current* maintainers, push.
+- Revoke a compromised key: set `revoked: true` and remove its `allowed_signers` line in the same way.
+- Lost quorum (keys gone, or a roster that approved itself before this rule existed): a server admin
+  resets the ref directly on the bare repository (`git --git-dir=… update-ref`), or deletes it with
+  `SHIPLOG_ALLOW_REF_DELETE=1` and pushes a new genesis. Record the reason in your audit log and
+  re-establish a healthy roster immediately.
 
-- Add a new maintainer/key:
-  - Update `trust.json` and `allowed_signers` with the new key/principal.
-  - Create a new trust commit (fast‑forward) and push `refs/_shiplog/trust/root`.
-
-- Remove or revoke a compromised maintainer/key:
-  - Either remove the maintainer entry, or set `revoked: true` and remove its line from `allowed_signers`.
-  - Create and push a trust update as above.
-
-- Change the threshold:
-  - Edit `threshold` in `trust.json`, then create and push a trust update.
-
-- Out‑of‑band update (bare repo admin only):
-  - In rare cases (e.g., all keys lost), an admin on the bare repository can write a new trust commit directly with `git --git-dir … update-ref`. Use this sparingly, record the reason in your audit log, and immediately re‑establish a healthy threshold and signer set.
-
-Always follow up with `./scripts/shiplog-trust-sync.sh` on all workstations and runners to install the updated `allowed_signers` and point `gpg.ssh.allowedSignersFile` to it.
+Always follow up with `./scripts/shiplog-trust-sync.sh` on workstations and runners.
 
 ## Recommended Runbook Entries
 
-See also `docs/runbooks/release.md`:1 for an end‑to‑end “use Shiplog to release Shiplog” flow including common failure paths and a CI outline.
-
-See the runbook appendix in the README for detailed “what if” responses covering key loss, trust rotation,
-and mirror recovery.
+See `docs/runbooks/release.md` for an end-to-end "use Shiplog to release Shiplog" flow and the
+runbook appendix in the README for key loss, trust rotation and mirror recovery.

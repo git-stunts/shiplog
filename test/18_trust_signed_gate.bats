@@ -64,7 +64,7 @@ JSON
   # Produce an attestation signature as a fallback under 'either' mode
   priv="$(git config user.signingkey)"
   base=$(printf "100644 blob %s${tab}trust.json\n100644 blob %s${tab}allowed_signers\n" "$oid_trust" "$oid_sigs" | git mktree)
-  printf 'shiplog-trust-tree-v1\n%s\n%s\n%s\n' "$base" "shiplog-trust-root" "1" > payload.txt
+  printf 'shiplog-trust-tree-v2\n%s\n%s\n%s\n%s\n' "$base" "shiplog-trust-root" "1" "0000000000000000000000000000000000000000" > payload.txt
   ssh-keygen -Y sign -q -f "$priv" -n shiplog-trust payload.txt >/dev/null
   mkdir -p .shiplog/trust_sigs
   mv payload.txt.sig .shiplog/trust_sigs/shiplog-tester@example.com.sig

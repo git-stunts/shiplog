@@ -43,7 +43,7 @@ JSON
   tab=$'\t'
   base=$(printf "100644 blob %s${tab}trust.json\n100644 blob %s${tab}allowed_signers\n" "$oid_trust" "$oid_sigs" | git mktree)
   echo "signing base=$base"
-  printf 'shiplog-trust-tree-v1\n%s\n%s\n%s\n' "$base" "shiplog-trust-root" "2" > payload.txt
+  printf 'shiplog-trust-tree-v2\n%s\n%s\n%s\n%s\n' "$base" "shiplog-trust-root" "2" "0000000000000000000000000000000000000000" > payload.txt
   mkdir -p .shiplog/trust_sigs
   ssh-keygen -Y sign -q -f "$tmpa/id_ed25519" -n shiplog-trust payload.txt >/dev/null
   mv payload.txt.sig .shiplog/trust_sigs/a@example.com.sig
