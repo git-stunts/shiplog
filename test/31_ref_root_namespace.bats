@@ -473,3 +473,45 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == *"hello-from-refroot"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Notes are shared: a second writer must build on the published notes ref
+# ---------------------------------------------------------------------------
+
+@test "a second clone attaching a log fast-forwards the notes ref before pushing it" {
+  shiplog_bootstrap_trust
+  shiplog_write_local_policy
+  git push -q origin "$DEFAULT_ROOT/trust/root" HEAD:refs/heads/main
+
+  local other
+  other=$(mktemp -d)
+  git clone -q "$REMOTE_DIR" "$other/b" 2>/dev/null
+  git -C "$other/b" config user.name "Shiplog Tester"
+  git -C "$other/b" config user.email "$TESTER_EMAIL"
+  git -C "$other/b" fetch -q origin "+$DEFAULT_ROOT/*:$DEFAULT_ROOT/*"
+  cp -R .shiplog "$other/b/.shiplog"
+
+  # Writer A publishes an entry with a log while B's notes ref is still absent.
+  export SHIPLOG_AUTO_PUSH=1 SHIPLOG_LOG="$LOG_FILE"
+  run write_entry
+  echo "writer A: $output" >&2
+  [ "$status" -eq 0 ]
+  a_notes=$(git --git-dir="$REMOTE_DIR" rev-parse "$DEFAULT_ROOT/notes/logs")
+
+  # Writer B attaches a log too; its notes commit must build on A's.
+  pushd "$other/b" >/dev/null
+  run write_entry
+  b_status=$status
+  b_output=$output
+  popd >/dev/null
+  unset SHIPLOG_LOG
+  export SHIPLOG_AUTO_PUSH=0
+  rm -rf "$other"
+  echo "writer B: $b_output" >&2
+  [ "$b_status" -eq 0 ]
+  b_notes=$(git --git-dir="$REMOTE_DIR" rev-parse "$DEFAULT_ROOT/notes/logs")
+  [ "$b_notes" != "$a_notes" ]
+  git --git-dir="$REMOTE_DIR" merge-base --is-ancestor "$a_notes" "$b_notes"
+  # Both entries keep their log on the published notes ref.
+  [ "$(git --git-dir="$REMOTE_DIR" ls-tree -r --name-only "$b_notes" | wc -l | tr -d ' ')" -eq 2 ]
+}

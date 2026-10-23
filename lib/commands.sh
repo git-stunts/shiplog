@@ -98,7 +98,8 @@ maybe_sync_shiplog_ref() {
   [ -n "$remote_oid" ] || return 0
 
   local local_oid
-  local_oid=$(git rev-parse "$ref" 2>/dev/null || true)
+  # -q --verify: a missing ref must read as empty (plain rev-parse echoes the name).
+  local_oid=$(git rev-parse -q --verify "$ref" 2>/dev/null || true)
   if [ -z "$local_oid" ]; then
     fast_forward_ref "$ref" "fetch"
     return 0
@@ -325,8 +326,10 @@ EOF
     if [ "${dry_run:-0}" -ne 1 ]; then
       maybe_sync_shiplog_ref "$trust_ref"
       maybe_sync_shiplog_ref "$journal_ref"
+      # Bring the local notes ref up to the published one so the note added
+      # below is a fast-forward of what other writers already pushed.
       if [ -n "$notes_ref" ]; then
-        git fetch "$remote" "$notes_ref" >/dev/null 2>&1 || true
+        maybe_sync_shiplog_ref "$notes_ref"
       fi
     fi
   fi
