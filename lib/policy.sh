@@ -50,7 +50,8 @@
 #   POLICY_REQUIRE_SIGNED, POLICY_ALLOWED_SIGNERS_FILE, POLICY_ALLOWED_AUTHORS,
 #   POLICY_NOTES_REF              raw values taken from the document ("" when absent)
 
-SHIPLOG_POLICY_LOADED_ENV="${SHIPLOG_POLICY_LOADED_ENV:-}"
+# Process-local cache key; never inherited, or an exported value would skip loading.
+SHIPLOG_POLICY_LOADED_ENV=""
 POLICY_ENV="${POLICY_ENV:-}"
 POLICY_SOURCE_AUTHORS="${POLICY_SOURCE_AUTHORS:-}"
 POLICY_SOURCE_SIGNERS="${POLICY_SOURCE_SIGNERS:-}"

@@ -199,3 +199,15 @@ drop_signers() {
     [ "$status" -ne 0 ]
   done
 }
+
+@test "SLT.BUG.LIB.010: an inherited SHIPLOG_POLICY_LOADED_ENV does not skip the policy document" {
+  printf '{"version":"1.0.0","authors":{"default_allowlist":["only-me@example.com"]}}\n' > .shiplog/policy.json
+  run env SHIPLOG_POLICY_LOADED_ENV=prod git shiplog policy show --boring
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Allowed Authors: only-me@example.com"* ]]
+  run env SHIPLOG_POLICY_LOADED_ENV=prod SHIPLOG_SIGN=0 git shiplog --boring --yes write
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not in allowlist: only-me@example.com"* ]]
+  run git show-ref refs/_shiplog/journal/prod
+  [ "$status" -ne 0 ]
+}
