@@ -10,7 +10,7 @@ Ship it. Then prove you shipped it.
 
 ---
 
-## Dry dock ⚠️
+## Dry dock
 
 > [!IMPORTANT]
 > **Shiplog is in dry dock.** A full audit on 2026-10-21 found that the hull is sound and the locks are not: the storage layer (refs, trailers, compare-and-swap updates, fast-forward checks) passed review; the *enforcement* layer (trust quorum, signature verification, the pre-receive hook) has P0 defects and is being rebuilt behind an adversarial test suite.
@@ -158,7 +158,7 @@ git shiplog trust show
 Entries are signed with the SSH key you already use for Git (`SHIPLOG_SIGN=1`). No new PKI, no new accounts, no signing service with a status page.
 
 > [!NOTE]
-> **What's being rebuilt (see [Dry dock](#dry-dock-)):** the *server-side* verification of these rules. Today the hook can be bypassed by anyone with push access to the trust ref. After roadmap goal G3, trust changes are verified against the *previous* roster, the N-of-M quorum counts distinct maintainer keys via detached SSH attestations (the only quorum mode going forward), ref deletion is refused, and policy changes must be signed by a current maintainer. Details: [`docs/TRUST.md`](./docs/TRUST.md).
+> **What's being rebuilt (see [Dry dock](#dry-dock)):** the *server-side* verification of these rules. Today the hook can be bypassed by anyone with push access to the trust ref. After roadmap goal G3, trust changes are verified against the *previous* roster, the N-of-M quorum counts distinct maintainer keys via detached SSH attestations (the only quorum mode going forward), ref deletion is refused, and policy changes must be signed by a current maintainer. Details: [`docs/TRUST.md`](./docs/TRUST.md).
 
 ---
 
@@ -225,7 +225,7 @@ Because you already back them up, replicate them, access-control them, and sign 
 Yes. It's `git` and `bash`. Push when you can.
 
 **Can an attacker rewrite history?**
-Journals are fast-forward-only and chained by `seq`/`journal_parent`, so a rewrite is detectable. Whether it's *prevented* depends on your host's enforcement, and that's exactly the layer in [dry dock](#dry-dock-) right now. We are not going to tell you it's bulletproof until the adversarial suite says so.
+Journals are fast-forward-only and chained by `seq`/`journal_parent`, so a rewrite is detectable. Whether it's *prevented* depends on your host's enforcement, and that's exactly the layer in [dry dock](#dry-dock) right now. We are not going to tell you it's bulletproof until the adversarial suite says so.
 
 **Does Shiplog use Shiplog?**
 Not yet, and yes, we heard you. Roadmap goal G9 makes this repo record its own CI runs and releases in its own ledger, on GitHub.com, under the branch namespace, with `verify` as a required check. A deploy ledger that doesn't log its own deploys would be a bit much.
@@ -255,4 +255,4 @@ Plan of record: [`ROADMAP.md`](./ROADMAP.md). Pick an issue from [#155](https://
 
 MIT © J. Kirby Ross · [git-stunts](https://github.com/git-stunts)
 
-_Jenkins was not harmed in the making of this project. We're still not sure what Jenkins is doing, but it says SUCCESS._
+*Jenkins was not harmed in the making of this project. We're still not sure what Jenkins is doing, but it says SUCCESS.*
