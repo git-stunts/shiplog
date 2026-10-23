@@ -119,18 +119,23 @@ Shiplog never touches your branches. Everything lives in its own ref namespace:
 A journal commit looks like this:
 
 ```text
-Deploy: web → prod (success)
-Reason: canary 5%
-Ticket: OPS-421
-Run: kubectl rollout status deploy/web (exit 0, 42s)
+Deploy: web → prod/us-east-1/prod-a/web
+Reason: canary 5% (OPS-421)
+Status: SUCCESS (0s) @ 2026-10-22T14:03:11Z
+Seq:    17 (parent 8f1c2d0, trust a91e4b7, anchor (none))
+Author: deploy-bot@example.com
+Repo:   3b5e9c1…
 
----
-{"env":"prod","seq":17,"status":"success","what":{"service":"web","image":"web:2.4.1"},
- "where":{"region":"us-east-1","cluster":"prod-a","namespace":"web"},
- "why":{"reason":"canary 5%","ticket":"OPS-421"},"journal_parent":"8f1c…","trust_oid":"a91e…"}
+---  # structured trailer for machines
+{"version":1,"env":"prod","seq":17,"status":"success",
+ "what":{"service":"web","artifact":null,"repo_head":"3b5e9c1…"},
+ "where":{"env":"prod","region":"us-east-1","cluster":"prod-a","namespace":"web"},
+ "why":{"reason":"canary 5%","ticket":"OPS-421"},
+ "run":{"cmd":"kubectl rollout status deploy/web","exit_code":0,"duration_s":42,"log_attached":true,…},
+ "journal_parent":"8f1c2d0…","trust_oid":"a91e4b7…",…}
 ```
 
-Humans read the top. Machines read the bottom. `seq` and `journal_parent` chain entries so a gap or rewrite is detectable; `trust_oid` pins which roster was current when the entry was written. Updates use `git update-ref` with an expected old value, so two runners racing to append cannot clobber each other. One wins; the other retries with a fresh `seq`.
+Humans read the top. Machines read the bottom. `seq` and `journal_parent` chain entries so a gap or rewrite is detectable; `trust_oid` pins which roster was current when the entry was written. Updates use `git update-ref` with an expected old value, so two runners racing to append cannot clobber each other. One wins; the other's update is refused, and re-running it appends on top with the next `seq`.
 
 Full trailer schema: [`docs/reference/json-schema.md`](./docs/reference/json-schema.md).
 
