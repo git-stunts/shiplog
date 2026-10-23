@@ -209,6 +209,24 @@ ref_under_root() {
   esac
 }
 
+# The well-known Shiplog roots (default and the branch namespace). A ref under a
+# well-known root that is not this server's root is never validated here, yet
+# clients on the other layout and `refs migrate` read it. So creates and updates
+# there are refused; deletions stay allowed so `refs migrate --remove-old` can
+# clean up. SHIPLOG_ALLOW_MIXED_REF_ROOT=1 lifts this for staged migrations.
+WELL_KNOWN_REF_ROOTS=("refs/_shiplog" "refs/heads/_shiplog")
+ref_under_other_root() {
+  local root
+  ref_under_root "$1" && return 1
+  for root in "${WELL_KNOWN_REF_ROOTS[@]}"; do
+    [ "$root" = "$REF_ROOT" ] && continue
+    case "$1" in
+      "$root"/*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 if [ "$ALLOW_MIXED_REF_ROOT" != "1" ]; then
   ref_under_root "$TRUST_REF" \
     || error "SHIPLOG_TRUST_REF=$TRUST_REF is outside the ref root $REF_ROOT; set SHIPLOG_REF_ROOT to the root the clients use, or SHIPLOG_ALLOW_MIXED_REF_ROOT=1 to accept a mixed layout"
@@ -719,6 +737,12 @@ while read -r old_sha new_sha refname; do
     *)
       if [ "$new_sha" = "$ZERO_OID" ]; then
         continue
+      fi
+      if ref_under_other_root "$refname"; then
+        if [ "$ALLOW_MIXED_REF_ROOT" != "1" ]; then
+          error "$refname is outside this server's ref root $REF_ROOT and would not be validated; push it under $REF_ROOT (git shiplog refs migrate) or set SHIPLOG_ALLOW_MIXED_REF_ROOT=1 during a staged migration"
+        fi
+        warn "SHIPLOG_ALLOW_MIXED_REF_ROOT=1: accepting $refname outside the ref root $REF_ROOT WITHOUT validation"
       fi
       ;;
   esac

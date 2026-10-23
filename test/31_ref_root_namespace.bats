@@ -611,3 +611,42 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == *"hello-from-refroot"* ]]
 }
+
+@test "hook on one root refuses creates and updates under the other well-known root; deletions and the mixed opt-out still work" {
+  forged=$(git commit-tree "$(git mktree </dev/null)" -m "forged entry outside the server's root")
+
+  # Server on the branch root: nothing may be written under refs/_shiplog/**.
+  install_hook_with_env "$REMOTE_DIR" "SHIPLOG_REF_ROOT=$BRANCH_ROOT"
+  git update-ref "$DEFAULT_ROOT/journal/prod" "$forged"
+  run git push origin "$DEFAULT_ROOT/journal/prod"
+  echo "legacy create: $output" >&2
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"outside this server's ref root"* ]]
+  [ -z "$(git --git-dir="$REMOTE_DIR" rev-parse -q --verify "$DEFAULT_ROOT/journal/prod" || true)" ]
+
+  # Control: an ordinary branch is not a Shiplog ref and is accepted.
+  git update-ref refs/heads/feature "$forged"
+  run git push origin refs/heads/feature
+  [ "$status" -eq 0 ]
+
+  # Deleting a leftover under the other root is allowed (refs migrate --remove-old).
+  git --git-dir="$REMOTE_DIR" update-ref "$DEFAULT_ROOT/journal/old" "$forged"
+  run git push origin ":$DEFAULT_ROOT/journal/old"
+  echo "legacy delete: $output" >&2
+  [ "$status" -eq 0 ]
+  [ -z "$(git --git-dir="$REMOTE_DIR" rev-parse -q --verify "$DEFAULT_ROOT/journal/old" || true)" ]
+
+  # Opt-out for staged migrations.
+  install_hook_with_env "$REMOTE_DIR" "SHIPLOG_REF_ROOT=$BRANCH_ROOT" "SHIPLOG_ALLOW_MIXED_REF_ROOT=1"
+  run git push origin "$DEFAULT_ROOT/journal/prod"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WITHOUT validation"* ]]
+
+  # The reverse: a server on the default root refuses writes under refs/heads/_shiplog/**.
+  install_hook_with_env "$REMOTE_DIR"
+  git update-ref "$BRANCH_ROOT/journal/prod" "$forged"
+  run git push origin "$BRANCH_ROOT/journal/prod"
+  echo "branch-root create on default server: $output" >&2
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"outside this server's ref root"* ]]
+}
