@@ -66,6 +66,7 @@ git shiplog run --dry-run --service deploy --reason "Smoke test" -- env printf h
 - `--reason <text>` — Optional free-form description.
 - `--status-success <status>` — Status recorded when the wrapped command exits 0. Default `success`.
 - `--status-failure <status>` — Status recorded when the command fails. Default `failed`.
+- Both statuses must be one of `success`, `failed`, `in_progress`, `skipped`, `override`, `revert`, `finalize`. An invalid value is rejected before the command runs (`shiplog: invalid status 'bogus' ...`), so a typo never executes a deploy that then cannot be recorded.
 - `--ticket <id>`, `--region <r>`, `--cluster <c>`, `--namespace <ns>` — Override standard write metadata.
 - When there is no output, log attachment is skipped and `log_attached=false` is recorded in the trailer.
 - Confirmation text: set `SHIPLOG_CONFIRM_TEXT` to override the default emoji (see above).

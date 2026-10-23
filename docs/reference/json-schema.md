@@ -117,7 +117,7 @@ The `run` block appears when the entry was produced by `git shiplog run`. Its sh
 | `argv` | array[string] | Original argument vector passed to the wrapped command. |
 | `cmd` | string | Shell-quoted command string for human readability. |
 | `exit_code` | integer | Exit status of the wrapped command. |
-| `status` | string | Final status (`success` or `failed` as recorded in the trailer; CLI flags map to these values). |
+| `status` | string | Status recorded for the run: `--status-success` (default `success`) when the command exits 0, else `--status-failure` (default `failed`). Both must be values of the top-level `status` enum and are checked before the command runs. |
 | `duration_s` | integer | Execution duration in seconds. |
 | `started_at` | string | UTC timestamp when execution began. |
 | `finished_at` | string | UTC timestamp when execution completed. |
@@ -206,7 +206,7 @@ The `run` block appears when the entry was produced by `git shiplog run`. Its sh
         "exit_code": {"type": "integer"},
         "status": {
           "type": "string",
-          "enum": ["success", "failed"]
+          "enum": ["success", "failed", "in_progress", "skipped", "override", "revert", "finalize"]
         },
         "duration_s": {"type": "integer"},
         "started_at": {"type": "string", "format": "date-time"},

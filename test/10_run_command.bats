@@ -160,3 +160,24 @@ teardown() {
   run bash -lc "git shiplog show --json $sha | jq -r '.run.exit_code'"
   [ "$output" = "7" ]
 }
+
+@test "run rejects an invalid --status-success/--status-failure before running the command" {
+  local marker="$BATS_TEST_TMPDIR/ran-marker"
+  rm -f "$marker"
+  run git shiplog run --service t --status-failure bogus -- sh -c "touch '$marker'; exit 3"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid status 'bogus'"* ]]
+  [ ! -e "$marker" ]
+  run git shiplog run --service t --status-success=nope -- sh -c "touch '$marker'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid status 'nope'"* ]]
+  [ ! -e "$marker" ]
+  run git show-ref "${REF_ROOT}/journal/prod"
+  [ "$status" -ne 0 ]
+  # Positive control: a documented non-default status is accepted and recorded.
+  run git shiplog run --service t --status-failure revert -- sh -c "touch '$marker'; exit 3"
+  [ "$status" -eq 3 ]
+  [ -e "$marker" ]
+  run bash -c "git shiplog show --json ${REF_ROOT}/journal/prod | jq -r '.status + \" \" + .run.status + \" \" + (.run.exit_code|tostring)'"
+  [ "$output" = "revert revert 3" ]
+}

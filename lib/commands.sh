@@ -697,6 +697,15 @@ EOF
     die "shiplog: --service (or SHIPLOG_SERVICE) is required for run"
   fi
   shiplog_validate_env_name "$env"
+  # Validate both statuses before the command runs: cmd_write rejects a status
+  # outside the documented enum, and discovering that only after a deploy has
+  # executed would leave it unrecorded.
+  local run_status_flag
+  for run_status_flag in "$status_success" "$status_failure"; do
+    if ! shiplog_status_is_valid "$run_status_flag"; then
+      die "shiplog: invalid status '$run_status_flag' (expected one of: $SHIPLOG_STATUS_VALUES)"
+    fi
+  done
 
   local -a quoted_cmd=()
   local arg
