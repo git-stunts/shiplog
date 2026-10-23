@@ -290,7 +290,15 @@ jobs:
               exit 1
             fi
           done
-          echo "make test forwards TEST_TIMEOUT_SECS, SHIPLOG_USE_LOCAL_SANDBOX and BATS_FLAGS."
+          # Unset knobs must not be forwarded as empty values: `-e VAR=` on
+          # the command line overrides the same VAR from a caller's
+          # DOCKER_RUN_OPTS="--env-file ..." (docker applies --env-file first).
+          out=$(env -u TEST_TIMEOUT_SECS -u SHIPLOG_USE_LOCAL_SANDBOX -u BATS_FLAGS make -n test)
+          if grep -E -- '-e (TEST_TIMEOUT_SECS|SHIPLOG_USE_LOCAL_SANDBOX|BATS_FLAGS)=' <<<"$out"; then
+            echo "::error::make test forwards an unset test knob as an empty value"
+            exit 1
+          fi
+          echo "make test forwards TEST_TIMEOUT_SECS, SHIPLOG_USE_LOCAL_SANDBOX and BATS_FLAGS only when set."
       - name: No signing build leg left in the workflows
         run: |
           set -euo pipefail

@@ -14,15 +14,17 @@ CONTAINER_NAME  ?= shiplog-tests-run
 RUN_ID          := $(shell date +%s)
 DOCKER_RUN_OPTS ?=
 
-# Test environment forwarded to `docker run` (empty values mean "use the
-# container default": no timeout, local sandbox, plain `bats -r`).
+# Test environment forwarded to `docker run`. A knob is forwarded only when
+# set; unset means "use the container default" (no timeout, local sandbox,
+# plain `bats -r`). Unset knobs are not passed as empty `-e VAR=` because that
+# would override the same variable from DOCKER_RUN_OPTS="--env-file ...".
 TEST_TIMEOUT_SECS         ?=
 SHIPLOG_USE_LOCAL_SANDBOX ?=
 BATS_FLAGS                ?=
 TEST_ENV_FLAGS = \
-	-e TEST_TIMEOUT_SECS="$(TEST_TIMEOUT_SECS)" \
-	-e SHIPLOG_USE_LOCAL_SANDBOX="$(SHIPLOG_USE_LOCAL_SANDBOX)" \
-	-e BATS_FLAGS="$(BATS_FLAGS)"
+	$(if $(TEST_TIMEOUT_SECS),-e TEST_TIMEOUT_SECS="$(TEST_TIMEOUT_SECS)") \
+	$(if $(SHIPLOG_USE_LOCAL_SANDBOX),-e SHIPLOG_USE_LOCAL_SANDBOX="$(SHIPLOG_USE_LOCAL_SANDBOX)") \
+	$(if $(BATS_FLAGS),-e BATS_FLAGS="$(BATS_FLAGS)")
 
 .PHONY: all build test clean progress
 
