@@ -34,9 +34,9 @@ git shiplog --env staging ls
   2. `--env` flag
   3. `SHIPLOG_ENV` environment variable
   4. Falls back to default (`prod`) if none specified
-- **Journal Reference**: Lists from `refs/_shiplog/journal/<env>`. If the ref has no entries, the command fails with an error.
+- **Journal Reference**: Lists from `<ref root>/journal/<env>` (default root `refs/_shiplog`; see `git shiplog refs root show`). If the ref has no entries, the command fails with an error.
 - **Entry Processing**: When `jq` is available, `ls` reads values from the JSON trailer for robustness. Otherwise it falls back to subject/body parsing.
-- **Columns**: Status, Service, Env, Author, Date.
+- **Columns**: Commit, Status, Service, Env, Author, Date. Status is the trailer's status value in upper case (for example `SUCCESS`, `FAILED`).
 - **Missing values**: Rendered as `-` (columns are kept stable; no noisy `?`).
 - **LIMIT**: Caps the number of entries returned (default `20`). Must be a positive integer; anything else, a third argument or an unknown flag is an error. `--` ends option parsing (`git shiplog ls -- staging`).
 - **Output**: In interactive mode with Bosun, renders a table. Otherwise prints TSV with header.

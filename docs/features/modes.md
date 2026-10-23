@@ -14,7 +14,8 @@ Policy controls which mode is active. You can switch at any time without rewriti
 
 ## Enabling Signing
 
-1) Bootstrap trust (once)
+### 1. Bootstrap trust (once)
+
 - Create a signed trust commit at `refs/_shiplog/trust/root` containing `trust.json` and `allowed_signers`.
 - Interactive: `./scripts/shiplog-bootstrap-trust.sh`
 - Non-interactive (env-driven):
@@ -35,14 +36,16 @@ export SHIPLOG_ASSUME_YES=1 SHIPLOG_PLAIN=1
 ./scripts/shiplog-bootstrap-trust.sh
 ```
 
-2) Distribute allowed signers
+### 2. Distribute allowed signers
+
 - Install the signer roster on each machine and point Git at it:
 
 ```
 ./scripts/shiplog-trust-sync.sh
 ```
 
-3) Require signatures in policy (global or per‑environment)
+### 3. Require signatures in policy (global or per‑environment)
+
 - Edit `.shiplog/policy.json` and set:
 
 ```
@@ -56,7 +59,8 @@ export SHIPLOG_ASSUME_YES=1 SHIPLOG_PLAIN=1
 git push origin refs/_shiplog/policy/current
 ```
 
-4) Configure clients/CI to sign
+### 4. Configure clients/CI to sign
+
 - Either rely on policy, or explicitly set `SHIPLOG_SIGN=1` on jobs.
 - Configure the signing key (`git config gpg.format ssh` + `user.signingkey` for SSH).
 
@@ -80,7 +84,7 @@ The CLI setup wizard supports this via `--strict-envs "prod staging"`.
 
 ## Disabling Signing
 
-1) Flip policy off and publish
+### 1. Flip policy off and publish
 
 ```
 # Edit .shiplog/policy.json
@@ -90,9 +94,10 @@ The CLI setup wizard supports this via `--strict-envs "prod staging"`.
 git push origin refs/_shiplog/policy/current
 ```
 
-2) Clients stop signing automatically
+### 2. Clients stop signing automatically
+
 - CLI default is unsigned; remove `SHIPLOG_SIGN=1` if you were setting it.
-- You can keep the trust ref; it is simply not used when `require_signed` is false.
+- Keep the trust ref: `write` still requires it even when `require_signed` is false, because every entry records the trust tip as `trust_oid` and the hook checks it (#63).
 
 ## Server Enforcement and Bootstrap
 

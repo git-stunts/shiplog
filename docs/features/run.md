@@ -79,6 +79,7 @@ git shiplog run --dry-run --service deploy --reason "Smoke test" -- env printf h
 
 ## Caveats
 
+- **Secrets:** the command's stdout and stderr are stored as a git note and pushed with the journal, and the command line is recorded in the trailer (`run.argv`). Neither passes through the message plugins (they only see the commit message), and nothing is redacted (#86). Do not wrap commands that print credentials, and do not pass secrets as arguments; read them from the environment or a file instead.
 - Dry runs do not validate connectivity to downstream systems—it only checks CLI argument parsing and policy prerequisites.
 - Ensure `perl` is available if you rely on Bosun rendering; otherwise Shiplog falls back to plain text.
 
