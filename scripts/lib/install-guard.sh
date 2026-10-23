@@ -124,6 +124,15 @@ shiplog_guard_install_dir() {
     "~") expanded="$HOME" ;;
     "~"/*) expanded="$HOME/${expanded#"~"/}" ;;
   esac
+  # `[ -L link/ ]` and `[ -L link/. ]` follow the link, so strip trailing "/"
+  # and "/." before testing the final component itself.
+  while :; do
+    case "$expanded" in
+      ?*/) expanded="${expanded%/}" ;;
+      ?*/.) expanded="${expanded%/.}" ;;
+      *) break ;;
+    esac
+  done
   if [ -L "$expanded" ]; then
     echo "$label: refusing: $raw_dir is a symlink; remove it manually first" >&2
     return 1

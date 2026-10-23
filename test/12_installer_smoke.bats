@@ -459,3 +459,23 @@ make_restricted_path() {
   [ -x "$HOME/.shiplog/bin/git-shiplog" ]
   [ "$(git -C "$HOME/.shiplog" rev-parse HEAD)" = "$(git -C "$HOME/.shiplog" rev-parse '@{upstream}')" ]
 }
+
+@test "guard refuses a symlinked install dir written with a trailing slash or /." {
+  make_fake_checkout "$HOME/real-shiplog"
+  : > "$HOME/real-shiplog/sentinel"
+  ln -s "$HOME/real-shiplog" "$HOME/.shiplog"
+
+  local form
+  for form in "$HOME/.shiplog/" "$HOME/.shiplog//" "$HOME/.shiplog/."; do
+    SHIPLOG_HOME="$form" run env -u SHIPLOG_REPO_URL bash "$UNINSTALLER" --dry-run --silent
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"symlink"* ]]
+    [[ "$output" != *"rm -rf"* ]]
+  done
+  [ -f "$HOME/real-shiplog/sentinel" ]
+
+  # Positive control: the real directory with a trailing slash is accepted.
+  SHIPLOG_HOME="$HOME/real-shiplog/" run env -u SHIPLOG_REPO_URL bash "$UNINSTALLER" --dry-run --silent
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"+ rm -rf "*"real-shiplog"* ]]
+}
