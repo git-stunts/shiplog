@@ -169,9 +169,93 @@ ff_update() {
   git update-ref -m "$msg" "$ref" "$new" "${old:-0000000000000000000000000000000000000000}"
 }
 
+# -------- Structured trailer --------
+# A journal entry is a human header, one sentinel line, then a JSON object.
+# The writer emits exactly SHIPLOG_TRAILER_SENTINEL; every reader takes the
+# LAST sentinel line, so user text in the header can never move the parse
+# (SLT.BUG.CLI.001). Entries without a sentinel (hand-built or legacy) fall
+# back to the last bare `---` line. The hook (contrib/hooks/pre-receive.shiplog
+# read_commit_json) applies the same rule; keep them in sync.
+SHIPLOG_TRAILER_SENTINEL='---  # structured trailer for machines'
+
+# Documented status enum (docs/reference/json-schema.md). cmd_write validates
+# against this list; validate-trailer checks the same values.
+SHIPLOG_STATUS_VALUES="success failed in_progress skipped override revert finalize"
+
+# Top-level trailer keys the writer owns. SHIPLOG_EXTRA_JSON / `append --json`
+# may not set any of them (SLT.BUG.CLI.010); see docs/reference/json-schema.md.
+# `commit` and `notes` are reserved because export-json adds them at read time.
+SHIPLOG_RESERVED_TRAILER_KEYS="version env ts who what where why how status when seq journal_parent trust_oid previous_anchor repo_head run commit notes"
+
+# shiplog_extract_trailer < message
+# Prints the JSON trailer of a commit message read from stdin (nothing when no
+# separator is present).
+shiplog_extract_trailer() {
+  awk -v sentinel="$SHIPLOG_TRAILER_SENTINEL" '
+    { line[NR] = $0 }
+    $0 == sentinel { exact = NR }
+    /^---/ { bare = NR }
+    END {
+      sep = exact ? exact : bare
+      if (!sep) exit
+      for (i = sep + 1; i <= NR; i++) print line[i]
+    }'
+}
+
+# shiplog_extract_header < message
+# Prints the human header: everything before the separator that
+# shiplog_extract_trailer would pick (the whole message when there is none).
+shiplog_extract_header() {
+  awk -v sentinel="$SHIPLOG_TRAILER_SENTINEL" '
+    { line[NR] = $0 }
+    $0 == sentinel { exact = NR }
+    /^---/ { bare = NR }
+    END {
+      sep = exact ? exact : bare
+      if (!sep) sep = NR + 1
+      for (i = 1; i < sep; i++) print line[i]
+    }'
+}
+
 read_trailer_json() {
   local commit="$1"
-  git show -s --format=%B "$commit" | awk '/^---/{flag=1;next}flag'
+  git show -s --format=%B "$commit" | shiplog_extract_trailer
+}
+
+# shiplog_single_line VALUE
+# Header fields are one line each. Carriage returns are dropped and newlines
+# become a single space, so no field can start a new header line and no header
+# line can ever look like the trailer separator.
+shiplog_single_line() {
+  printf '%s' "$1" | tr -d '\r' | tr '\n' ' '
+}
+
+# shiplog_status_is_valid STATUS
+shiplog_status_is_valid() {
+  local candidate="$1" value
+  for value in $SHIPLOG_STATUS_VALUES; do
+    [ "$value" = "$candidate" ] && return 0
+  done
+  return 1
+}
+
+# shiplog_extra_json_check JSON [SOURCE]
+# An extra-JSON payload must be an object and must not carry a reserved
+# top-level key. Dies naming the offending key.
+shiplog_extra_json_check() {
+  local payload="$1" source="${2:-SHIPLOG_EXTRA_JSON}"
+  need jq
+  if ! printf '%s\n' "$payload" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    die "shiplog: $source must be a JSON object"
+  fi
+  local reserved_json clash
+  # shellcheck disable=SC2086 # word-splitting the key list is intended
+  reserved_json=$(printf '%s\n' $SHIPLOG_RESERVED_TRAILER_KEYS | jq -R . | jq -sc .)
+  clash=$(printf '%s\n' "$payload" | jq -r --argjson reserved "$reserved_json" \
+    '[keys[] | select(. as $k | $reserved | index($k) != null)] | first // empty')
+  if [ -n "$clash" ]; then
+    die "shiplog: $source may not set reserved trailer key \"$clash\" (reserved keys: $SHIPLOG_RESERVED_TRAILER_KEYS)"
+  fi
 }
 
 trailer_value() {
@@ -282,9 +366,23 @@ JQ
     --argjson seq "$seq" \
     "$jq_filter")
 
+  # `run` metadata is a core key that cmd_run supplies through SHIPLOG_RUN_JSON
+  # (internal). It is attached before extras, so extras can never replace it.
+  if [ -n "${SHIPLOG_RUN_JSON:-}" ]; then
+    local run_merged
+    if ! run_merged=$(printf '%s\n' "$json" | jq --argjson run "${SHIPLOG_RUN_JSON}" '.run = $run' 2>/dev/null); then
+      die "shiplog: SHIPLOG_RUN_JSON must be a valid JSON object"
+    fi
+    json="$run_merged"
+  fi
+
+  # Extras (append --json / SHIPLOG_EXTRA_JSON) sit beside the core keys. A
+  # payload naming a reserved key is rejected, and the merge is `$extra + .`
+  # so the core trailer wins even if that check were ever bypassed.
   if [ -n "${SHIPLOG_EXTRA_JSON:-}" ]; then
+    shiplog_extra_json_check "${SHIPLOG_EXTRA_JSON}" "SHIPLOG_EXTRA_JSON"
     local extra_merged
-    if ! extra_merged=$(printf '%s\n' "$json" | jq -S --argjson extra "${SHIPLOG_EXTRA_JSON}" '. + $extra' 2>/dev/null); then
+    if ! extra_merged=$(printf '%s\n' "$json" | jq -S --argjson extra "${SHIPLOG_EXTRA_JSON}" '$extra + .' 2>/dev/null); then
       die "shiplog: SHIPLOG_EXTRA_JSON must be valid JSON object"
     fi
     json="$extra_merged"
@@ -313,7 +411,7 @@ Seq:    $seq (parent $parent_short, trust $trust_short, anchor $anchor_short)
 Author: ${author_email:-unknown}
 Repo:   ${repo_head}
 
----  # structured trailer for machines
+$SHIPLOG_TRAILER_SENTINEL
 $json
 EOF
 }
@@ -322,8 +420,12 @@ sign_commit() {
   local tree="$1"; shift
   shiplog_policy_assert_loaded
   local sign_mode="${SHIPLOG_SIGN_EFFECTIVE:-0}"
-  GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-${SHIPLOG_AUTHOR_NAME:-$(git config user.name || echo 'Shiplog Bot')}}"
-  GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-${SHIPLOG_AUTHOR_EMAIL:-$(git config user.email || echo 'shiplog-bot@local')}}"
+  # One identity everywhere: the email the allowlist precheck and the trailer's
+  # who.email used becomes both the author and the committer of the entry
+  # (SLT.BUG.LIB.012). The hook and `verify` read %ae.
+  local author_name author_email
+  author_name="${GIT_AUTHOR_NAME:-${SHIPLOG_AUTHOR_NAME:-$(git config user.name || echo 'Shiplog Bot')}}"
+  author_email="${GIT_AUTHOR_EMAIL:-${SHIPLOG_AUTHOR_EMAIL:-$(git config user.email || echo 'shiplog-bot@local')}}"
 
   # Build commit-tree command safely without expanding an empty array under set -u
   local -a cmd
@@ -336,7 +438,8 @@ sign_commit() {
   if [ "$#" -gt 0 ]; then
     cmd+=("$@")
   fi
-  GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL" \
+  GIT_AUTHOR_NAME="$author_name" GIT_AUTHOR_EMAIL="$author_email" \
+  GIT_COMMITTER_NAME="$author_name" GIT_COMMITTER_EMAIL="$author_email" \
     "${cmd[@]}"
 }
 
@@ -470,7 +573,7 @@ pretty_ls() {
     author="$(git show -s --format='%ae' "$c")"
     date="$(git show -s --format='%cs' "$c")"
     body="$(git show -s --format=%B "$c")"
-    json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+    json="$(shiplog_extract_trailer <<< "$body")"
     if command -v jq >/dev/null 2>&1 && [ -n "$json" ]; then
       service="$(printf '%s' "$json" | jq -r '.what.service // empty')"
       env="$(printf '%s' "$json" | jq -r '.env // .where.env // empty')"
@@ -503,8 +606,8 @@ show_entry() {
   local body human json notes_ref
   notes_ref=$(shiplog_notes_git_ref)
   body="$(git show -s --format=%B "$target")"
-  human="$(awk '/^---/{exit} {print}' <<< "$body")"
-  json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+  human="$(shiplog_extract_header <<< "$body")"
+  json="$(shiplog_extract_trailer <<< "$body")"
 
   local bosun_bin=""
   local bosun_available=0

@@ -49,7 +49,7 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
   - Purpose: append a new entry non-interactively by supplying a JSON payload via CLI, stdin, or file.
   - Usage: `printf '{"deployment":"green"}' | git shiplog append --service deploy --status success --json -`
   - Flags: mirrors `write` (`--service`, `--status`, `--reason`, `--ticket`, `--region`, `--cluster`, `--namespace`, `--image`, `--tag`, `--run-url`, `--log`, `--env`, `--dry-run`).
-  - Notes: sets `SHIPLOG_EXTRA_JSON` automatically with the provided object and runs `write` in boring/auto-confirm mode.
+  - Notes: sets `SHIPLOG_EXTRA_JSON` automatically with the provided object and runs `write` in boring/auto-confirm mode. The object may not set a reserved trailer key (`seq`, `status`, `trust_oid`, `run`, ...; see `docs/reference/json-schema.md`); such payloads are rejected naming the key.
 
 - `run [OPTIONS] -- <command ...>`
   - Purpose: wrap a shell command, tee its output (when interactive), and append a Shiplog entry describing the run.
@@ -57,7 +57,7 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
     - Success case: `git shiplog run --service deploy --reason "Smoke test" -- env printf hi`
     - Failure case: `git shiplog run --service deploy --status-failure failed -- false`
   - Flags: `--service`, `--reason`, `--status-success`, `--status-failure`, `--ticket`, `--region`, `--cluster`, `--namespace`, `--env`, `--dry-run`.
-  - Notes: everything after `--` is the wrapped command, including a first word that starts with `-` (`git shiplog run --service t -- --version`). Captures stdout/stderr to a temporary log that is attached as a git note (skipped if empty) and merges `{run:{...}}` into the JSON trailer via `SHIPLOG_EXTRA_JSON`. Prints a minimal confirmation after the run (default `🪵`), configurable via `SHIPLOG_CONFIRM_TEXT`. `--dry-run` prints the command that would execute and exits without running it or writing a journal entry. See `docs/features/run.md` for details.
+  - Notes: everything after `--` is the wrapped command, including a first word that starts with `-` (`git shiplog run --service t -- --version`). Captures stdout/stderr to a temporary log that is attached as a git note (skipped if empty) and adds the `run` object to the JSON trailer (internal `SHIPLOG_RUN_JSON`; `run` is reserved and cannot be overridden by extras). When the journal write fails, prints the write error and the preserved log path. Prints a minimal confirmation after the run (default `🪵`), configurable via `SHIPLOG_CONFIRM_TEXT`. `--dry-run` prints the command that would execute and exits without running it or writing a journal entry. See `docs/features/run.md` for details.
 
 - `ls [ENV] [LIMIT]`
   - Purpose: list recent entries.

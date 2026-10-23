@@ -390,9 +390,11 @@ JSON
   shiplog_bootstrap_trust
   shiplog_write_local_policy
   export SHIPLOG_LOG="$LOG_FILE"
-  export SHIPLOG_EXTRA_JSON='{"run":{"log_attached":true}}'
+  # `run` is a reserved trailer key (#121): simulate a `git shiplog run` entry
+  # through the internal channel cmd_run uses, not SHIPLOG_EXTRA_JSON.
+  export SHIPLOG_RUN_JSON='{"log_attached":true}'
   run write_entry
-  unset SHIPLOG_LOG SHIPLOG_EXTRA_JSON
+  unset SHIPLOG_LOG SHIPLOG_RUN_JSON
   echo "write: $output" >&2
   [ "$status" -eq 0 ]
   run git rev-parse -q --verify "$DEFAULT_ROOT/notes/logs"

@@ -99,7 +99,9 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
 - `SHIPLOG_REGION`, `SHIPLOG_CLUSTER`, `SHIPLOG_NAMESPACE`
 - `SHIPLOG_IMAGE`, `SHIPLOG_TAG`, `SHIPLOG_RUN_URL`
 - `SHIPLOG_LOG` — Path to NDJSON log to attach as a git note
-- `SHIPLOG_EXTRA_JSON` — *(internal)* Raw JSON object merged into the structured trailer; set automatically by `git shiplog run`/`git shiplog append`. Do not export this manually—provide custom data with `git shiplog append --json '{...}'` or `git shiplog append --json-file payload.json` (these flags populate the internal value for you).
+- `SHIPLOG_AUTHOR_NAME`, `SHIPLOG_AUTHOR_EMAIL` — Identity for the entry when `GIT_AUTHOR_*` is unset (defaults to `git config user.*`). Used for the allowlist check, the trailer's `who`, and as both author and committer of the journal commit.
+- `SHIPLOG_EXTRA_JSON` — *(internal)* Raw JSON object merged into the structured trailer; set automatically by `git shiplog append`. Do not export this manually—provide custom data with `git shiplog append --json '{...}'` or `git shiplog append --json-file payload.json` (these flags populate the internal value for you). Reserved top-level keys (`seq`, `status`, `trust_oid`, `run`, ...; see `docs/reference/json-schema.md`) are rejected by name, and core keys always win the merge.
+- `SHIPLOG_RUN_JSON` — *(internal)* The `run` object that `git shiplog run` attaches to the trailer. Not for manual use.
 
 See: docs/features/write.md for full semantics and examples.
 
