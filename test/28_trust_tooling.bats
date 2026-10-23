@@ -57,6 +57,34 @@ build_trust_k_docs() {
   [ "$actual" = "$expected" ]
 }
 
+@test "trust-sign: a rotation attestation binds the local trust tip as prior and verifies" {
+  build_trust_k_docs
+  adv_use_signing_key K
+  genesis=$(adv_trust_commit -S K -e "$TESTER_EMAIL" --sig "$TESTER_EMAIL=K" -m "shiplog: trust root" "$TRUST_K" "$SIGNERS_K")
+  git update-ref "$ADV_TRUST_REF" "$genesis"
+
+  # Rotation draft: same roster, new id. The helper's default prior is the local tip.
+  trust_next=$(jq -c '.id = "shiplog-trust-root-2"' <<<"$TRUST_K")
+  draft=$(adv_trust_commit -S K -e "$TESTER_EMAIL" -m "shiplog: rotation draft" "$trust_next" "$SIGNERS_K")
+  [ "$("$SHIPLOG_PROJECT_ROOT/scripts/shiplog-trust-sign.sh" --message-only "$draft" | tail -n1)" = "$genesis" ]
+  sigdir=$(mktemp -d)
+  run env SHIPLOG_TRUST_SIG_DIR="$sigdir" "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-trust-sign.sh" --principal "$TESTER_EMAIL" "$draft"
+  [ "$status" -eq 0 ]
+  sig_oid=$(git hash-object -w "$sigdir/$TESTER_EMAIL.sig")
+  rm -rf "$sigdir"
+  rotation=$(adv_trust_commit -p "$genesis" -S K -e "$TESTER_EMAIL" --sig-blob "$TESTER_EMAIL=$sig_oid" \
+    -m "shiplog: rotation" "$trust_next" "$SIGNERS_K")
+
+  run env SHIPLOG_REQUIRE_SIGNED_TRUST=1 "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-verify-trust.sh" \
+    --old "$genesis" --new "$rotation" --ref "$ADV_TRUST_REF"
+  [ "$status" -eq 0 ]
+
+  # The same attestation does not approve the document as a genesis (prior = zero OID).
+  run env SHIPLOG_REQUIRE_SIGNED_TRUST=1 "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-verify-trust.sh" \
+    --old "$ADV_ZERO_OID" --new "$(adv_trust_commit -S K -e "$TESTER_EMAIL" --sig-blob "$TESTER_EMAIL=$sig_oid" -m "shiplog: replayed as genesis" "$trust_next" "$SIGNERS_K")" --ref "$ADV_TRUST_REF"
+  [ "$status" -ne 0 ]
+}
+
 @test "trust-sign: a signature produced by the helper verifies through the shared verifier" {
   build_trust_k_docs
   adv_use_signing_key K

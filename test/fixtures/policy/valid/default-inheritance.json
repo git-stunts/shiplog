@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "require_signed": false,
+  "deployment_requirements": {
+    "default": {
+      "require_signed": true
+    },
+    "prod": {
+      "require_ticket": true
+    },
+    "staging": {
+      "require_signed": false
+    }
+  },
+  "authors": {
+    "default_allowlist": [
+      "deploy-bot@example.com"
+    ],
+    "env_overrides": {
+      "prod": [
+        "lead@example.com"
+      ],
+      "default": [
+        "dev@example.com"
+      ]
+    }
+  },
+  "notes_ref": "refs/_shiplog/notes/logs"
+}

@@ -180,3 +180,77 @@ JSON
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
+
+# --- SLT.BUG.LIB.013: validate checks the working tree first; --ref / --file override ----
+
+@test "policy validate checks the edited working-tree file, not the published ref" {
+  shiplog_bootstrap_policy_ref
+  printf '{"version":1}\n' > .shiplog/policy.json
+  run git shiplog --boring policy validate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"policy-file:.shiplog/policy.json"* ]]
+  [[ "$output" == *"differs from refs/_shiplog/policy/current"* ]]
+  run git shiplog --boring policy validate --ref
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Policy OK (policy-ref:refs/_shiplog/policy/current)"* ]]
+  printf '{"version":"1.0.0","require_signed":false}\n' > other-policy.json
+  run git shiplog --boring policy validate --file other-policy.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Policy OK (file:other-policy.json)"* ]]
+  run git shiplog --boring policy validate --file "$SHIPLOG_PROJECT_ROOT/test/fixtures/policy/invalid/misspelled-key.json"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"requre_signed: unknown key"* ]]
+}
+
+@test "policy validate falls back to the ref when no working-tree file exists" {
+  shiplog_bootstrap_policy_ref
+  rm -f .shiplog/policy.json
+  run git shiplog --boring policy validate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"policy-ref:refs/_shiplog/policy/current"* ]]
+}
+
+# --- SLT.BUG.TOOL.006: sync-policy runs the real validator; callers abort before the ref moves ----
+
+@test "policy require-signed aborts when the resulting document is invalid and leaves the ref alone" {
+  printf '{"version":"1.0.0","authors":{}}\n' > .shiplog/policy.json
+  run git rev-parse --verify refs/_shiplog/policy/current
+  [ "$status" -ne 0 ]
+  run git shiplog --boring policy require-signed true
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"authors.default_allowlist"* ]]
+  run git rev-parse --verify refs/_shiplog/policy/current
+  [ "$status" -ne 0 ]
+}
+
+@test "sync-policy refuses an invalid policy with the validator's message" {
+  printf '{"version":"1.0.0","require_signed":"yes"}\n' > .shiplog/policy.json
+  run "$SHIPLOG_PROJECT_ROOT"/scripts/shiplog-sync-policy.sh .shiplog/policy.json
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"require_signed: boolean required"* ]]
+  run git rev-parse --verify refs/_shiplog/policy/current
+  [ "$status" -ne 0 ]
+}
+
+@test "sync-policy signs the policy commit by default when a signing key is configured" {
+  shiplog_setup_test_signing
+  run "$SHIPLOG_PROJECT_ROOT"/scripts/shiplog-sync-policy.sh .shiplog/policy.json
+  [ "$status" -eq 0 ]
+  run git cat-file commit refs/_shiplog/policy/current
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gpgsig "* ]]
+  # SHIPLOG_POLICY_SIGN=0 still forces an unsigned commit.
+  run env SHIPLOG_POLICY_SIGN=0 "$SHIPLOG_PROJECT_ROOT"/scripts/shiplog-sync-policy.sh .shiplog/policy.json
+  [ "$status" -eq 0 ]
+  run git cat-file commit refs/_shiplog/policy/current
+  [[ "$output" != *"gpgsig "* ]]
+}
+
+@test "sync-policy publishes unsigned with a hint when no signing key is configured" {
+  [ -z "$(git config user.signingkey 2>/dev/null || true)" ] || skip "a signing key is configured in this build"
+  run "$SHIPLOG_PROJECT_ROOT"/scripts/shiplog-sync-policy.sh .shiplog/policy.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unsigned"* ]]
+  run git cat-file commit refs/_shiplog/policy/current
+  [[ "$output" != *"gpgsig "* ]]
+}

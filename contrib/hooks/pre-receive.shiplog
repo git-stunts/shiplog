@@ -412,11 +412,14 @@ load_policy_state() {
 
 get_policy_require_signed() {
   local env="$1"
-  # Explicit has() check: a per-environment `false` must override a global `true`
-  # (jq's // operator would treat false as absent).
+  # Same lookup order as the CLI (lib/policy.sh): deployment_requirements[ENV] →
+  # deployment_requirements.default → top level. Explicit has() checks so an
+  # explicit `false` overrides an inherited `true` (jq's // would drop it).
   "$JQ_BIN" -r --arg env "$env" '
     if (.deployment_requirements[$env] | type == "object" and has("require_signed"))
     then .deployment_requirements[$env].require_signed
+    elif (.deployment_requirements.default | type == "object" and has("require_signed"))
+    then .deployment_requirements.default.require_signed
     else (.require_signed // false)
     end | tostring' <<<"$CURRENT_POLICY_JSON"
 }
@@ -571,6 +574,7 @@ ensure_commit_signed_if_required() {
   fi
   if [ -n "$SIGNERS_FILE" ]; then
     trust_verify_commit_roster_signature "$commit" "$SIGNERS_FILE" || error "signature for $commit not accepted by the trust roster"
+    trust_verify_commit_signer_not_revoked "$commit" "$SIGNERS_FILE" "$CURRENT_TRUST_JSON" || error "signature for $commit comes from a revoked maintainer"
   else
     trust_verify_commit_roster_signature "$commit" "" || error "signature verification failed for $commit"
   fi

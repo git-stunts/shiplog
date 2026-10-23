@@ -325,8 +325,9 @@ teardown() {
 # ---------------------------------------------------------------------------
 
 @test "policy notes_ref is used by write, show, export-json and publish" {
-  # Default root; the Docker runner's SHIPLOG_NOTES_REF must lose to the policy.
-  export SHIPLOG_NOTES_REF="$DEFAULT_ROOT/notes/logs"
+  # Default root. SHIPLOG_NOTES_REF outranks the policy (lib/policy.sh precedence
+  # table), so drop the Docker runner's value to let the policy notes_ref apply.
+  unset SHIPLOG_NOTES_REF
   shiplog_bootstrap_trust
   mkdir -p .shiplog
   cat > .shiplog/policy.json <<'JSON'
@@ -371,6 +372,18 @@ JSON
   [[ "$output" == *"$DEFAULT_ROOT/journal/prod"* ]]
   [[ "$output" == *"$DEFAULT_ROOT/notes/deploy"* ]]
   [[ "$output" != *"$DEFAULT_ROOT/notes/logs"* ]]
+
+  # SHIPLOG_NOTES_REF wins over the policy notes_ref, for policy show and the
+  # commands alike, so both report the same ref.
+  export SHIPLOG_NOTES_REF="$DEFAULT_ROOT/notes/override"
+  run git shiplog policy show --json
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.notes_ref')" = "$DEFAULT_ROOT/notes/override" ]
+  [ "$(printf '%s\n' "$output" | jq -r '.sources.notes_ref')" = "env:SHIPLOG_NOTES_REF" ]
+  run git shiplog export-json
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | head -n1 | jq -r '.notes.ref')" = "$DEFAULT_ROOT/notes/override" ]
+  unset SHIPLOG_NOTES_REF
 }
 
 @test "publish fails loudly when entries claim log_attached but the notes ref is missing locally" {

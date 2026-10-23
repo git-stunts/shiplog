@@ -1,7 +1,7 @@
 # Notes Attachments
 
 ## Summary
-Shiplog can attach NDJSON logs or other artifacts to journal entries using Git notes. Notes are stored under one resolved notes ref: the policy `notes_ref` if set, else `SHIPLOG_NOTES_REF`, else `<ref root>/notes/logs` (`refs/_shiplog/notes/logs` by default). `write`, `show`, `export-json` and `publish` all resolve the same ref, so attached logs stay visible and get published. The attachments appear in `git shiplog show` output.
+Shiplog can attach NDJSON logs or other artifacts to journal entries using Git notes. Notes are stored under one resolved notes ref: `SHIPLOG_NOTES_REF` if set, else the policy `notes_ref`, else `<ref root>/notes/logs` (`refs/_shiplog/notes/logs` by default). `write`, `show`, `export-json` and `publish` all resolve the same ref, so attached logs stay visible and get published. The attachments appear in `git shiplog show` output.
 
 ## Usage
 ```bash

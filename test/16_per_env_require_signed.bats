@@ -101,6 +101,35 @@ JSON
   [[ "$output" == *"missing required signature"* ]]
 }
 
+@test "deployment_requirements.default.require_signed is inherited by the hook like the CLI (#127)" {
+  cat > .shiplog/policy.json <<'JSON'
+{
+  "version": "1.0.0",
+  "require_signed": false,
+  "authors": {"default_allowlist": ["shiplog-tester@example.com"]},
+  "deployment_requirements": {
+    "default": { "require_signed": true },
+    "staging": { "require_signed": false }
+  }
+}
+JSON
+  "$SHIPLOG_PROJECT_ROOT"/scripts/shiplog-sync-policy.sh >/dev/null
+  git shiplog init >/dev/null
+  git push -q "$REMOTE_NAME" refs/_shiplog/trust/root
+  git push -q "$REMOTE_NAME" refs/_shiplog/policy/current
+
+  # Control: staging explicitly opts out, so an unsigned entry passes.
+  make_entry_unsigned staging
+  run git push "$REMOTE_NAME" refs/_shiplog/journal/staging
+  [ "$status" -eq 0 ]
+
+  # prod has no entry of its own: it inherits default=true, not the top-level false.
+  make_entry_unsigned prod
+  run git push "$REMOTE_NAME" refs/_shiplog/journal/prod
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing required signature"* ]]
+}
+
 @test "unsigned allowed in staging but rejected in prod" {
   git shiplog init >/dev/null
   # Push trust and policy

@@ -88,8 +88,8 @@ shiplog_raw_policy_json() {
 }
 
 # shiplog_notes_ref
-# Prints the effective notes ref: policy `notes_ref` > SHIPLOG_NOTES_REF >
-# <ref root>/notes/logs. Every command that reads, attaches or pushes notes
+# Prints the effective notes ref: SHIPLOG_NOTES_REF > policy `notes_ref` >
+# <ref root>/notes/logs (the same precedence as shiplog_policy_load). Every command that reads, attaches or pushes notes
 # (write, show, export-json, publish) uses this so attached logs stay visible
 # and get published (#123). Cached per process.
 SHIPLOG_NOTES_REF_EFFECTIVE=""
@@ -99,16 +99,16 @@ shiplog_notes_ref() {
     return 0
   fi
   local result="" raw policy_notes=""
-  if git rev-parse --git-dir >/dev/null 2>&1; then
+  if [ -z "${SHIPLOG_NOTES_REF:-}" ] && git rev-parse --git-dir >/dev/null 2>&1; then
     raw=$(shiplog_raw_policy_json)
     if [ -n "$raw" ] && command -v jq >/dev/null 2>&1; then
       policy_notes=$(printf '%s\n' "$raw" | jq -r '.notes_ref // empty' 2>/dev/null || true)
     fi
   fi
-  if [ -n "$policy_notes" ]; then
-    result="$policy_notes"
-  elif [ -n "${SHIPLOG_NOTES_REF:-}" ]; then
+  if [ -n "${SHIPLOG_NOTES_REF:-}" ]; then
     result="$SHIPLOG_NOTES_REF"
+  elif [ -n "$policy_notes" ]; then
+    result="$policy_notes"
   else
     result="${NOTES_REF_DEFAULT:-$REF_ROOT/notes/logs}"
   fi
@@ -320,7 +320,7 @@ EOF
 
 sign_commit() {
   local tree="$1"; shift
-  resolve_policy
+  shiplog_policy_assert_loaded
   local sign_mode="${SHIPLOG_SIGN_EFFECTIVE:-0}"
   GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-${SHIPLOG_AUTHOR_NAME:-$(git config user.name || echo 'Shiplog Bot')}}"
   GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-${SHIPLOG_AUTHOR_EMAIL:-$(git config user.email || echo 'shiplog-bot@local')}}"
@@ -362,7 +362,7 @@ attach_note_if_present() {
 
 ensure_signed_on_verify() {
   local commit="$1"
-  resolve_policy
+  shiplog_policy_assert_loaded
 
   case "${SHIPLOG_SIGN_EFFECTIVE:-0}" in
     0|false|no|off) return 0 ;;
@@ -383,7 +383,7 @@ ensure_signed_on_verify() {
 }
 
 author_allowed() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   local author="$1"
   local allow="$ALLOWED_AUTHORS_EFFECTIVE"
   [ -z "$allow" ] && return 0
@@ -394,7 +394,7 @@ author_allowed() {
 }
 
 require_allowed_author() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   local allow="$ALLOWED_AUTHORS_EFFECTIVE"
   [ -z "$allow" ] && return 0
 
@@ -419,7 +419,7 @@ require_allowed_author() {
 }
 
 require_allowed_signer() {
-  resolve_policy
+  shiplog_policy_assert_loaded
   case "${SHIPLOG_SIGN_EFFECTIVE:-0}" in
     0|false|no|off) return 0 ;;
   esac

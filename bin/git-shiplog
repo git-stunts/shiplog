@@ -10,8 +10,6 @@ LIB_DIR="${SHIPLOG_LIB_DIR:-$SHIPLOG_HOME/lib}"
 # Ref layout (REF_ROOT, NOTES_REF, POLICY_REF, TRUST_REF) is resolved below,
 # after the libraries are sourced; see "Ref layout".
 DEFAULT_ENV="${SHIPLOG_ENV:-prod}"
-AUTHOR_ALLOWLIST="${SHIPLOG_AUTHORS:-}"
-ALLOWED_SIGNERS_FILE="${SHIPLOG_ALLOWED_SIGNERS:-.shiplog/allowed_signers}"
 SHIPLOG_BORING="${SHIPLOG_BORING:-0}"
 SHIPLOG_AUTO_PUSH="${SHIPLOG_AUTO_PUSH:-1}"
 SHIPLOG_AUTO_PUSH_FLAG="${SHIPLOG_AUTO_PUSH_FLAG:-0}"
@@ -27,14 +25,12 @@ if [ -z "${SHIPLOG_BOSUN_BIN:-}" ]; then
 fi
 export SHIPLOG_BOSUN_BIN
 
-SHIPLOG_POLICY_INITIALIZED=0
+# Policy state (filled by shiplog_policy_load in lib/policy.sh)
 POLICY_SOURCE=""
 POLICY_REQUIRE_SIGNED=""
 POLICY_ALLOWED_SIGNERS_FILE=""
 POLICY_ALLOWED_AUTHORS=""
 POLICY_NOTES_REF=""
-POLICY_JOURNALS_PREFIX=""
-POLICY_ANCHORS_PREFIX=""
 
 SHIPLOG_SIGN_EFFECTIVE=""
 ALLOWED_AUTHORS_EFFECTIVE=""
@@ -57,13 +53,40 @@ done
 need git
 need jq
 
+# Booleans read from the environment are parsed once, here, and fail closed:
+# an unrecognized spelling is an error, never "off" (SLT.BUG.LIB.003 / CLI.007 / CLI.009).
+shiplog_bool_var SHIPLOG_BORING SHIPLOG_BORING "${SHIPLOG_BORING:-}" 0
+shiplog_bool_var SHIPLOG_AUTO_PUSH SHIPLOG_AUTO_PUSH "${SHIPLOG_AUTO_PUSH:-}" 1
+if [ -n "${SHIPLOG_DRY_RUN:-}" ]; then
+  shiplog_bool_var SHIPLOG_DRY_RUN SHIPLOG_DRY_RUN "$SHIPLOG_DRY_RUN" 0
+  export SHIPLOG_DRY_RUN
+fi
+if [ -n "${SHIPLOG_SIGN:-}" ]; then
+  shiplog_bool_var SHIPLOG_SIGN SHIPLOG_SIGN "$SHIPLOG_SIGN" 0
+  export SHIPLOG_SIGN
+fi
+export SHIPLOG_BORING SHIPLOG_AUTO_PUSH
+
+# Repository root for .shiplog/* lookups (policy file, plugins, signers paths).
+# Git runs external subcommands in the caller's cwd, so this is computed once
+# here and exported; the wrapped command in `run` keeps its own cwd (SLT.BUG.LIB.007).
+SHIPLOG_REPO_ROOT=""
+if SHIPLOG_REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$SHIPLOG_REPO_ROOT" ]; then
+  :
+elif SHIPLOG_REPO_ROOT=$(git rev-parse --absolute-git-dir 2>/dev/null) && [ -n "$SHIPLOG_REPO_ROOT" ]; then
+  SHIPLOG_REPO_ROOT="$(dirname "$SHIPLOG_REPO_ROOT")"
+else
+  SHIPLOG_REPO_ROOT=""
+fi
+export SHIPLOG_REPO_ROOT
+
 # -------- Ref layout --------
 # One root governs every Shiplog ref (#100). Precedence for the root:
 #   SHIPLOG_REF_ROOT (env) > git config shiplog.refRoot > refs/_shiplog
 # Derived from the root unless an explicit SHIPLOG_*_REF override is set:
 #   POLICY_REF  = $REF_ROOT/policy/current   (override: SHIPLOG_POLICY_REF)
 #   TRUST_REF   = $REF_ROOT/trust/root       (override: SHIPLOG_TRUST_REF)
-#   NOTES_REF   = $REF_ROOT/notes/logs       (override: policy notes_ref, SHIPLOG_NOTES_REF)
+#   NOTES_REF   = $REF_ROOT/notes/logs       (override: SHIPLOG_NOTES_REF, then policy notes_ref)
 #   journals    = $REF_ROOT/journal/<env>    anchors = $REF_ROOT/anchors/<env>
 shiplog_resolve_ref_root
 JOURNALS_REF_PREFIX="$REF_ROOT/journal"
@@ -150,7 +173,10 @@ run_with_global_flags() {
         shift
         ;;
       --dry-run=*)
-        SHIPLOG_DRY_RUN="${1#*=}"
+        if ! SHIPLOG_DRY_RUN=$(shiplog_parse_bool "${1#*=}"); then
+          echo "❌ shiplog: --dry-run accepts 1|true|yes|on|0|false|no|off, got '${1#*=}'" >&2
+          exit 1
+        fi
         SHIPLOG_DRY_RUN_EXPLICIT=1
         export SHIPLOG_DRY_RUN
         export SHIPLOG_DRY_RUN_EXPLICIT

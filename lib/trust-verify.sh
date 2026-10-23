@@ -166,22 +166,26 @@ trust_verify_base_tree() {
   fi
 }
 
-# trust_verify_payload_from_parts <base_tree_oid> <trust_id> <threshold>
-# The one attestation payload builder. Exactly four lines, each newline-terminated.
+# trust_verify_payload_from_parts <base_tree_oid> <trust_id> <threshold> [prior_oid]
+# The one attestation payload builder. Exactly five lines, each newline-terminated.
+# <prior_oid> is the trust commit this document replaces (the zero OID at genesis):
+# an attestation approves one transition, so it cannot be replayed onto another
+# history to restore an earlier roster.
 trust_verify_payload_from_parts() {
-  printf 'shiplog-trust-tree-v1\n%s\n%s\n%s\n' "$1" "$2" "$3"
+  printf 'shiplog-trust-tree-v2\n%s\n%s\n%s\n%s\n' "$1" "$2" "$3" "${4:-$TV_ZERO_OID}"
 }
 
-# trust_verify_payload <commit>
-# Prints the attestation payload for the trust document stored in <commit>.
+# trust_verify_payload <commit> [prior_oid]
+# Prints the attestation payload for the trust document stored in <commit>
+# replacing <prior_oid> (default: the zero OID, i.e. genesis).
 trust_verify_payload() {
-  local commit="$1" base trust_json trust_id threshold
+  local commit="$1" prior="${2:-$TV_ZERO_OID}" base trust_json trust_id threshold
   base=$(trust_verify_base_tree "$commit") || return 1
   trust_json=$(git show "$commit:trust.json" 2>/dev/null) || { tv_fail "trust.json missing at $commit"; return 1; }
   trust_id=$(printf '%s' "$trust_json" | tv_jq -r '.id // "shiplog-trust-root"') || return 1
   threshold=$(printf '%s' "$trust_json" | tv_jq -r '.threshold // 1') || return 1
-  tv_dbg "attestation payload: base_tree=$base trust_id=$trust_id threshold=$threshold"
-  trust_verify_payload_from_parts "$base" "$trust_id" "$threshold"
+  tv_dbg "attestation payload: base_tree=$base trust_id=$trust_id threshold=$threshold prior=$prior"
+  trust_verify_payload_from_parts "$base" "$trust_id" "$threshold" "$prior"
 }
 
 # trust_verify_principal_is_maintainer <trust_json> <principal>
@@ -328,6 +332,39 @@ trust_verify_commit_roster_signature() {
   fi
 }
 
+# trust_verify_commit_signer_not_revoked <commit> <signers_file> <trust_json>
+# Defense in depth for journal entries: fails when every roster binding of the
+# commit's signing key belongs to a maintainer marked revoked in <trust_json>
+# (for example, revoked but its allowed_signers line was not removed). Keys that
+# are not bound to any named principal are left to the roster signature check.
+trust_verify_commit_signer_not_revoked() {
+  local commit="$1" signers="${2:-}" trust_json="$3" bindings kind key principal revoked=0 other=0
+  bindings=$(trust_verify_commit_bindings "$commit" "$signers") || return 0
+  while IFS=$'\t' read -r kind key principal; do
+    [ -n "$kind" ] || continue
+    if [ "$kind" = gpg ]; then
+      if printf '%s' "$trust_json" | tv_jq -e --arg f "$(printf '%s' "$key" | tr -d ' ' | tr '[:lower:]' '[:upper:]')" '
+          [ .maintainers[] | select(type == "object") | select(.revoked == true)
+            | select((.pgp_fpr // "" | gsub(" "; "") | ascii_upcase) == $f) ] | length > 0' >/dev/null 2>&1; then
+        revoked=1
+      else
+        other=1
+      fi
+    elif printf '%s' "$trust_json" | tv_jq -e --arg p "$principal" '
+        [ .maintainers[] | select(type == "object") | select(.revoked == true)
+          | select((.email == $p) or (.principal == $p)) ] | length > 0' >/dev/null 2>&1; then
+      revoked=1
+    else
+      other=1
+    fi
+  done <<<"$bindings"
+  if [ "$revoked" -eq 1 ] && [ "$other" -eq 0 ]; then
+    tv_fail "commit $commit is signed by a revoked maintainer's key; remove its allowed_signers line"
+    return 1
+  fi
+  return 0
+}
+
 # trust_verify_commit_by_maintainer <commit> <signers_file> <trust_json> [what]
 # The commit must carry a valid signature whose key maps to an unrevoked
 # maintainer of <trust_json>: SSH keys via the roster principal, OpenPGP keys
@@ -367,14 +404,14 @@ trust_verify_commit_by_maintainer() {
   return 1
 }
 
-# trust_verify_attestations <new_commit> <signers_file> <roster_trust_json> <threshold>
+# trust_verify_attestations <new_commit> <signers_file> <roster_trust_json> <threshold> [prior_oid]
 # Counts detached attestations under .shiplog/trust_sigs/ in <new_commit> that
-# verify over the canonical payload of <new_commit>, come from a key listed in
+# verify over the canonical payload of <new_commit> replacing <prior_oid>, come from a key listed in
 # <signers_file> under a non-wildcard principal, and whose principal names an
 # unrevoked maintainer of <roster_trust_json>. Distinct keys are counted once.
 # Prints the count. Returns 0 when count >= threshold, 1 otherwise.
 trust_verify_attestations() {
-  local commit="$1" signers="${2:-}" trust_json="$3" threshold="$4"
+  local commit="$1" signers="${2:-}" trust_json="$3" threshold="$4" prior="${5:-$TV_ZERO_OID}"
   if ! command -v ssh-keygen >/dev/null 2>&1; then
     tv_fail "ssh-keygen not available; cannot verify attestations"
     printf '0\n'
@@ -388,7 +425,7 @@ trust_verify_attestations() {
   local payload sigfile
   payload=$(tv_tmpfile payload) || { printf '0\n'; return 1; }
   sigfile=$(tv_tmpfile sig) || { printf '0\n'; return 1; }
-  if ! trust_verify_payload "$commit" > "$payload"; then
+  if ! trust_verify_payload "$commit" "$prior" > "$payload"; then
     printf '0\n'
     return 1
   fi
@@ -569,7 +606,7 @@ trust_verify_update() {
       ;;
     attestation)
       local verified=0 astatus=0
-      verified=$(trust_verify_attestations "$new" "$roster_signers" "$roster_json" "$roster_threshold") || astatus=$?
+      verified=$(trust_verify_attestations "$new" "$roster_signers" "$roster_json" "$roster_threshold" "$old") || astatus=$?
       if [ "$astatus" -ne 0 ]; then
         if [ "$unenforced" -eq 1 ]; then
           tv_warn "attestation quorum not met (verified ${verified:-0} of $roster_threshold); accepted only because SHIPLOG_ALLOW_TRUST_THRESHOLD_UNENFORCED=1"

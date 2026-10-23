@@ -167,6 +167,34 @@ bootstrap_server_k() {
   [ "$(adv_remote_ref "$REMOTE_DIR" "$ADV_TRUST_REF")" = "$GENESIS_AB" ]
 }
 
+@test "trust-replay: re-pushing an earlier roster with its original attestations is rejected" {
+  adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
+  # S0: roster A, B, C (threshold 2), attested by A and B.
+  trust_abc=$(adv_trust_json 2 attestation a@example.com b@example.com c@example.com)
+  signers_abc="$(adv_signers a@example.com=A b@example.com=B c@example.com=C)"
+  s0=$(adv_trust_commit -S A --sig a@example.com=A --sig b@example.com=B \
+    -m "shiplog: trust root (A+B+C)" "$trust_abc" "$signers_abc")
+  git update-ref "$ADV_TRUST_REF" "$s0"
+  adv_push_ok "$ADV_TRUST_REF"
+
+  # S1: A and B remove C (say C's key leaked).
+  trust_ab=$(adv_trust_json 2 attestation a@example.com b@example.com)
+  signers_ab="$(adv_signers a@example.com=A b@example.com=B)"
+  s1=$(adv_trust_commit -p "$s0" -S A --sig a@example.com=A --sig b@example.com=B \
+    -m "shiplog: remove C" "$trust_ab" "$signers_ab")
+  git update-ref "$ADV_TRUST_REF" "$s1" "$s0"
+  adv_push_ok "$ADV_TRUST_REF"
+
+  # Replay by A alone: a child of S1, signed by A, that copies S0's tree with its
+  # .sig files. B never approved going from S1 back to S0, so 2-of-2 is not met.
+  replay=$(adv_commit_tree "$(git rev-parse "$s0^{tree}")" "$s1" A "shiplog: restore C" a@example.com)
+  adv_assert_commit_signed "$replay"
+  git update-ref "$ADV_TRUST_REF" "$replay" "$s1"
+
+  adv_push_rejected "$ADV_TRUST_REF"
+  [ "$(adv_remote_ref "$REMOTE_DIR" "$ADV_TRUST_REF")" = "$s1" ]
+}
+
 @test "legit-rotation: A+B quorum adding maintainer C is accepted" {
   adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
   build_genesis_ab
@@ -276,6 +304,35 @@ bootstrap_server_k() {
   [ -z "$(adv_server_signers_config "$REMOTE_DIR")" ]
 }
 
+@test "revoked-journal-signer: an entry signed by a revoked maintainer's key is rejected even if its roster line remains" {
+  adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
+  # Roster: the tester (K) and A, with A revoked in trust.json but still listed in allowed_signers.
+  trust=$(adv_trust_json 1 attestation "$TESTER_EMAIL" a@example.com:revoked)
+  signers="$(adv_signers "$TESTER_EMAIL=K" a@example.com=A)"
+  GENESIS_K=$(adv_trust_commit -S K --sig "$TESTER_EMAIL=K" -e "$TESTER_EMAIL" \
+    -m "shiplog: trust root (A revoked)" "$trust" "$signers")
+  git update-ref "$ADV_TRUST_REF" "$GENESIS_K"
+  git shiplog trust sync >/dev/null
+  adv_push_ok "$ADV_TRUST_REF"
+  build_policy_k true
+  adv_push_ok "$ADV_POLICY_REF"
+  git shiplog init >/dev/null
+
+  # Control: an entry signed by the unrevoked tester key is accepted.
+  adv_use_signing_key K
+  export SHIPLOG_SIGN=1
+  make_entry
+  adv_push_ok refs/_shiplog/journal/prod
+  first=$(adv_remote_ref "$REMOTE_DIR" refs/_shiplog/journal/prod)
+
+  adv_use_signing_key A
+  make_entry
+  entry=$(git rev-parse refs/_shiplog/journal/prod)
+  adv_assert_commit_signed "$entry"
+  adv_push_rejected refs/_shiplog/journal/prod
+  [ "$(adv_remote_ref "$REMOTE_DIR" refs/_shiplog/journal/prod)" = "$first" ]
+}
+
 @test "roster-swap: a signed entry is rejected after the roster drops the signing key" {
   bootstrap_server_k true
   adv_use_signing_key K
@@ -372,8 +429,21 @@ build_either_bait() {
 @test "either-waives: verifier rejects MODE=either with one commit signature and zero valid attestations at threshold 2" {
   build_genesis_ab
   git shiplog trust sync >/dev/null
-  build_either_bait
 
+  # Control: the same invocation accepts a child that carries valid A+B attestations,
+  # so the rejection below is about the bait, not a verifier that rejects everything.
+  legit=$(adv_trust_commit -p "$GENESIS_AB" -S A --sig a@example.com=A --sig b@example.com=B \
+    -m "shiplog: two valid attestations" "$TRUST_AB" "$SIGNERS_AB")
+  run env SHIPLOG_REQUIRE_SIGNED_TRUST=1 SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=either \
+    "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-verify-trust.sh" \
+    --old "$GENESIS_AB" --new "$legit" --ref "$ADV_TRUST_REF"
+  if [ "$status" -ne 0 ]; then
+    echo "--- control: verifier rejected a valid A+B child ---"
+    echo "$output"
+  fi
+  [ "$status" -eq 0 ]
+
+  build_either_bait
   run env SHIPLOG_REQUIRE_SIGNED_TRUST=1 SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=either \
     "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-verify-trust.sh" \
     --old "$GENESIS_AB" --new "$EITHER_BAIT" --ref "$ADV_TRUST_REF"
@@ -421,6 +491,22 @@ build_either_bait() {
 }
 
 @test "genesis-threshold-1: a threshold-2 genesis without attestations is rejected by the verifier" {
+  # Control: the same invocation accepts the signed threshold-1 genesis, so the
+  # rejection below is about the threshold, not a verifier that rejects every genesis.
+  trust1=$(adv_trust_json 1 - "$TESTER_EMAIL")
+  signers1="$(adv_signers_line "$TESTER_EMAIL" K)"
+  genesis1=$(adv_trust_commit -S K -e "$TESTER_EMAIL" -m "shiplog: trust root v1 (GENESIS)" "$trust1" "$signers1")
+  git update-ref "$ADV_TRUST_REF" "$genesis1"
+  git shiplog trust sync >/dev/null
+  run env SHIPLOG_REQUIRE_SIGNED_TRUST=1 \
+    "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-verify-trust.sh" \
+    --old "$ADV_ZERO_OID" --new "$genesis1" --ref "$ADV_TRUST_REF"
+  if [ "$status" -ne 0 ]; then
+    echo "--- control: verifier rejected a signed threshold-1 genesis ---"
+    echo "$output"
+  fi
+  [ "$status" -eq 0 ]
+
   trust=$(adv_trust_json 2 - a@example.com b@example.com)
   signers="$(adv_signers a@example.com=A b@example.com=B)"
   genesis=$(adv_trust_commit -S A -m "shiplog: unsatisfiable genesis" "$trust" "$signers")

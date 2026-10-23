@@ -219,3 +219,33 @@ teardown() {
   after_ref=$(git rev-parse -q --verify refs/_shiplog/policy/current 2>/dev/null || echo "")
   [ "$before_ref" = "$after_ref" ]
 }
+
+# --- SLT.BUG.LIB.014: --authors applies to every strictness level ----
+
+@test "setup strict honors --authors" {
+  run git shiplog --boring setup --strictness strict --authors a@x --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"default_allowlist"* ]]
+  [[ "$output" == *"a@x"* ]]
+}
+
+@test "setup strict defaults the allowlist to git config user.email" {
+  run git shiplog --boring setup --strictness strict --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"default_allowlist"* ]]
+  [[ "$output" == *"shiplog-tester@example.com"* ]]
+}
+
+@test "setup balanced includes user.email alongside --authors; open writes no allowlist without --authors" {
+  run git shiplog --boring setup --strictness balanced --authors other@example.com --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"other@example.com"* ]]
+  [[ "$output" == *"shiplog-tester@example.com"* ]]
+  run git shiplog --boring setup --strictness open --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"default_allowlist"* ]]
+  run git shiplog --boring setup --strictness open --authors a@x --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"default_allowlist"* ]]
+  [[ "$output" == *"a@x"* ]]
+}
