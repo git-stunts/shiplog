@@ -223,15 +223,15 @@ The script reads `allowed_signers` from the trust tip, writes it to the destinat
 
 *Source: [trust-modes.mmd](img/trust-modes.mmd)*
 
-* Fail closed when the trust ref, `trust.json`, `allowed_signers` or the shared module is missing.
-* Verify every non-genesis trust update against the prior roster; refuse non-fast-forward updates.
-* Count distinct unrevoked maintainer keys; chain mode is threshold 1 only.
-* Require the trust commit itself to be signed when `SHIPLOG_REQUIRE_SIGNED_TRUST=1`.
-* Require policy updates to be signed by a current maintainer and to contain a valid `policy.json`.
-* Refuse deletions; set `receive.denyDeletes` and `receive.denyNonFastForwards` as well.
-* For journal entries: fast-forward only, signature verified against the roster from the trust ref
+- Fail closed when the trust ref, `trust.json`, `allowed_signers` or the shared module is missing.
+- Verify every non-genesis trust update against the prior roster; refuse non-fast-forward updates.
+- Count distinct unrevoked maintainer keys; chain mode is threshold 1 only.
+- Require the trust commit itself to be signed when `SHIPLOG_REQUIRE_SIGNED_TRUST=1`.
+- Require policy updates to be signed by a current maintainer and to contain a valid `policy.json`.
+- Refuse deletions; set `receive.denyDeletes` and `receive.denyNonFastForwards` as well.
+- For journal entries: fast-forward only, signature verified against the roster from the trust ref
   (`git -c gpg.ssh.allowedSignersFile=<roster> verify-commit`), trailer fields and `trust_oid` checked.
-* Mirror `refs/_shiplog/{trust,policy,journal}` to a second remote or WORM storage for recovery.
+- Mirror `refs/_shiplog/{trust,policy,journal}` to a second remote or WORM storage for recovery.
 
 ## Troubleshooting Verification
 
@@ -272,5 +272,6 @@ Always follow up with `./scripts/shiplog-trust-sync.sh` on workstations and runn
 
 ## Recommended Runbook Entries
 
-See `docs/runbooks/release.md` for an end-to-end "use Shiplog to release Shiplog" flow and the
-runbook appendix in the README for key loss, trust rotation and mirror recovery.
+See `docs/runbooks/release.md` for an end-to-end "use Shiplog to release Shiplog" flow. Runbooks for
+key loss, trust rotation and mirror recovery are not written yet (#77); until then, follow the rotation
+and revocation steps in this document.

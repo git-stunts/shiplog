@@ -73,3 +73,38 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == "refs/heads/_shiplog" ]]
 }
+
+@test "config never plans sig_mode chain with threshold > 1 (D1; verifier rejects it)" {
+  export SHIPLOG_BORING=1
+  # Default for a self-hosted team of 2-5: attestation, threshold 2.
+  run bash -lc 'SHIPLOG_CONFIG_HOST=self-hosted SHIPLOG_CONFIG_TEAM=2-5 git shiplog config --interactive'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.threshold == 2 and .sig_mode == "attestation"' >/dev/null
+  # Control: solo stays on chain with threshold 1.
+  run bash -lc 'SHIPLOG_CONFIG_HOST=self-hosted SHIPLOG_CONFIG_TEAM=solo git shiplog config --interactive'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.threshold == 1 and .sig_mode == "chain"' >/dev/null
+  # An explicit chain with threshold > 1 is refused, not planned.
+  run bash -lc 'SHIPLOG_CONFIG_HOST=self-hosted SHIPLOG_CONFIG_TEAM=2-5 SHIPLOG_CONFIG_SIGMODE=chain git shiplog config --interactive'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"attestation"* ]]
+}
+
+@test "answers-file: an unknown sig_mode is rejected by name, not coerced to chain" {
+  export SHIPLOG_BORING=1
+  cat > answers.json <<JSON
+{"host":"self-hosted","threshold":2,"sig_mode":"chian","require_signed":"prod-only","autoPush":0}
+JSON
+  run bash -lc 'git shiplog config --answers-file answers.json'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown sig_mode"* ]]
+  [[ "$output" == *"chian"* ]]
+  # Control: case is normalized, so ATTESTATION is accepted.
+  cat > answers.json <<JSON
+{"host":"self-hosted","threshold":2,"sig_mode":"ATTESTATION","require_signed":"prod-only","autoPush":0}
+JSON
+  run bash -lc 'git shiplog config --answers-file answers.json'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.sig_mode == "attestation"' >/dev/null
+  rm -f answers.json
+}

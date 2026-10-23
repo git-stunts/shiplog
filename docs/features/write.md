@@ -66,7 +66,7 @@ Tip (non‑interactive/CI): avoid prompts by passing required fields via flags o
 
 - `test/02_write_and_ls_show.bats:22`
 - `test/05_verify_authors.bats:9`
-- `test/10_boring_mode.bats:31`
+- `test/02_write_and_ls_show.bats` (non-interactive `--boring` writes)
 - `test/17_append_and_trust.bats`
 
 ## Programmatic Append

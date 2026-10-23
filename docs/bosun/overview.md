@@ -2,7 +2,7 @@
 
 Bosun provides lightweight TUI primitives implemented in pure Bash, designed to work in both interactive shells and non-interactive environments while honoring `NO_COLOR`.
 
-> **ANSI stripping:** Bosun uses `perl` to strip ANSI sequences when it measures coloured text for box layout (`bosun style`). When `perl` is not installed it falls back to a no-op (`cat`): output still renders, but a coloured title can misalign the top border by the width of the escape codes. Making `perl` a hard requirement is tracked in [#74](https://github.com/git-stunts/shiplog/issues/74).
+> **ANSI stripping:** Bosun uses `perl` to strip ANSI sequences when it measures coloured text for box layout (`bosun style`). When `perl` is not installed it falls back to a no-op (`cat`): output still renders, but a coloured title can misalign the top border by the width of the escape codes. A portable `sed` fallback is tracked in [#179](https://github.com/git-stunts/shiplog/issues/179); `perl` will not become a requirement.
 
 ## Interactive detection
 
