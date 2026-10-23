@@ -1,14 +1,17 @@
 # Export JSON Command
 
 ## Summary
+
 `git shiplog export-json` emits NDJSON records for journal entries so downstream systems can ingest Shiplog data. Each line combines the stored JSON trailer with the commit SHA in a `commit` field.
 
 ## Usage
+
 ```bash
 git shiplog export-json [ENV] [--lenient] | jq '.'
 ```
 
 ## Behavior
+
 - Requires `jq` to be available.
 - Streams commits in reverse chronological order and appends a `commit` field to each JSON payload.
 - Each valid line also carries `notes` (`{ref, attached}`): the resolved notes ref (`SHIPLOG_NOTES_REF` > policy `notes_ref` > `<ref root>/notes/logs`) and whether a log note exists for the entry there.
@@ -29,8 +32,10 @@ git shiplog export-json prod --lenient | jq -c 'select(.error) | {commit, subjec
 ```
 
 ## Related Code
+
 - `lib/commands.sh` — `cmd_export_json()`
 
 ## Tests
+
 - `test/03_export_json_ndjson.bats:11`
 - `test/38_cli_parsing.bats` (malformed trailers, exit 3, `--lenient`, missing journal)
