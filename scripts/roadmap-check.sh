@@ -279,6 +279,11 @@ self_test() {
   [ "${#GOALS[@]}" -ge 9 ] || { echo "self-test: expected >= 9 goals, got ${#GOALS[@]}"; rc=1; }
   [ -n "${GOAL_CHECKS[G1]:-}" ] || { echo "self-test: G1 has no checks"; rc=1; }
   rm -rf "$t"
+  # The workflow holds an issues:write token: actions pinned to a full SHA, no persisted credentials.
+  if grep -E '^[[:space:]]*(- )?uses:' "$ROOT/.github/workflows/roadmap.yml" | grep -Evq '@[0-9a-f]{40}([[:space:]]|$)' \
+    || ! grep -Eq '^[[:space:]]*persist-credentials:[[:space:]]*false' "$ROOT/.github/workflows/roadmap.yml"; then
+    echo "self-test: roadmap.yml has an unpinned action or persisted credentials"; rc=1
+  fi
   st_setup
   # Issue updates need no perl, and a failed transformation must not reach gh issue edit.
   printf '#!/bin/sh\nexit 127\n' > "$ST_DIR/bin/perl"; chmod +x "$ST_DIR/bin/perl"
