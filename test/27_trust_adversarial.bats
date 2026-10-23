@@ -372,8 +372,21 @@ build_either_bait() {
 @test "either-waives: verifier rejects MODE=either with one commit signature and zero valid attestations at threshold 2" {
   build_genesis_ab
   git shiplog trust sync >/dev/null
-  build_either_bait
 
+  # Control: the same invocation accepts a child that carries valid A+B attestations,
+  # so the rejection below is about the bait, not a verifier that rejects everything.
+  legit=$(adv_trust_commit -p "$GENESIS_AB" -S A --sig a@example.com=A --sig b@example.com=B \
+    -m "shiplog: two valid attestations" "$TRUST_AB" "$SIGNERS_AB")
+  run env SHIPLOG_REQUIRE_SIGNED_TRUST=1 SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=either \
+    "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-verify-trust.sh" \
+    --old "$GENESIS_AB" --new "$legit" --ref "$ADV_TRUST_REF"
+  if [ "$status" -ne 0 ]; then
+    echo "--- control: verifier rejected a valid A+B child ---"
+    echo "$output"
+  fi
+  [ "$status" -eq 0 ]
+
+  build_either_bait
   run env SHIPLOG_REQUIRE_SIGNED_TRUST=1 SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=either \
     "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-verify-trust.sh" \
     --old "$GENESIS_AB" --new "$EITHER_BAIT" --ref "$ADV_TRUST_REF"
@@ -421,6 +434,22 @@ build_either_bait() {
 }
 
 @test "genesis-threshold-1: a threshold-2 genesis without attestations is rejected by the verifier" {
+  # Control: the same invocation accepts the signed threshold-1 genesis, so the
+  # rejection below is about the threshold, not a verifier that rejects every genesis.
+  trust1=$(adv_trust_json 1 - "$TESTER_EMAIL")
+  signers1="$(adv_signers_line "$TESTER_EMAIL" K)"
+  genesis1=$(adv_trust_commit -S K -e "$TESTER_EMAIL" -m "shiplog: trust root v1 (GENESIS)" "$trust1" "$signers1")
+  git update-ref "$ADV_TRUST_REF" "$genesis1"
+  git shiplog trust sync >/dev/null
+  run env SHIPLOG_REQUIRE_SIGNED_TRUST=1 \
+    "$SHIPLOG_PROJECT_ROOT/scripts/shiplog-verify-trust.sh" \
+    --old "$ADV_ZERO_OID" --new "$genesis1" --ref "$ADV_TRUST_REF"
+  if [ "$status" -ne 0 ]; then
+    echo "--- control: verifier rejected a signed threshold-1 genesis ---"
+    echo "$output"
+  fi
+  [ "$status" -eq 0 ]
+
   trust=$(adv_trust_json 2 - a@example.com b@example.com)
   signers="$(adv_signers a@example.com=A b@example.com=B)"
   genesis=$(adv_trust_commit -S A -m "shiplog: unsatisfiable genesis" "$trust" "$signers")
