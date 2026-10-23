@@ -66,7 +66,7 @@ load_gh_data() {
     [ -n "$n" ] && ISSUE_STATE[$n]="$s"
   done < <(printf '%s' "$json" | jq -r '.[] | "\(.number)\t\(.state)"')
   TRACKING_BODY=$(gh issue view "$ISSUE" --json body -q .body 2>/dev/null) || return 1
-  CI_MAIN=$(gh run list --workflow ci.yml --branch main --status completed --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || true)
+  CI_MAIN=$(gh run list --workflow ci.yml --branch main --status completed --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null) || return 1
   GH_OK=1
   return 0
 }
@@ -288,6 +288,11 @@ self_test() {
   { st_line '- [x] G1: one' && st_line '- [x] G2: two'; } || { echo "self-test: --goal --update touched other goals"; rc=1; }
   st_run --goal G9 --update; local st_rc=$?
   { [ "$st_rc" -eq 2 ] && [ ! -e "$ST_DIR/edited.md" ]; } || { echo "self-test: unknown --goal not rejected (exit $st_rc)"; rc=1; }
+  # A failed CI lookup is a tooling error, not a red main: no edit, exit 2.
+  : > "$ST_DIR/run_fail"
+  st_run --update; st_rc=$?
+  rm -f "$ST_DIR/run_fail"
+  { [ "$st_rc" -eq 2 ] && [ ! -e "$ST_DIR/edited.md" ]; } || { echo "self-test: failed CI lookup not treated as tooling error (exit $st_rc)"; rc=1; }
   rm -rf "$ST_DIR"
   [ $rc -eq 0 ] && echo "self-test: ok"
   return $rc
