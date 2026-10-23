@@ -554,3 +554,33 @@ JSON
   [ "$status" -eq 0 ]
   [ "$(git --git-dir="$REMOTE_DIR" rev-parse "$BRANCH_ROOT/notes/logs")" = "$(git rev-parse "$BRANCH_ROOT/notes/logs")" ]
 }
+
+# ---------------------------------------------------------------------------
+# #100: trust-sign binds the prior trust tip under the configured root
+# ---------------------------------------------------------------------------
+
+@test "trust-sign run on its own binds the trust tip under SHIPLOG_REF_ROOT or shiplog.refRoot" {
+  bootstrap_trust_at "$BRANCH_ROOT/trust/root"
+  genesis=$(git rev-parse "$BRANCH_ROOT/trust/root")
+  update=$(git commit-tree "$(git rev-parse "$genesis^{tree}")" -p "$genesis" -m "shiplog: trust update")
+  local sign="$SHIPLOG_PROJECT_ROOT/scripts/shiplog-trust-sign.sh"
+
+  # Control: the default root has no trust ref, so the payload binds genesis (zero OID).
+  run "$sign" --message-only "$update"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | tail -n1)" = "0000000000000000000000000000000000000000" ]
+
+  run env SHIPLOG_REF_ROOT="$BRANCH_ROOT" "$sign" --message-only "$update"
+  echo "env payload: $output" >&2
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | tail -n1)" = "$genesis" ]
+
+  git config shiplog.refRoot "$BRANCH_ROOT"
+  run "$sign" --message-only "$update"
+  echo "config payload: $output" >&2
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | tail -n1)" = "$genesis" ]
+  # With no COMMIT argument the trust commit also comes from the configured root.
+  run "$sign" --message-only
+  [ "$status" -eq 0 ]
+}
