@@ -8,7 +8,8 @@
 # links are ignored. Missing targets are printed as `file:line target`.
 #
 # Usage: scripts/dev/check-md-links.sh [FILE...]
-# Exit:  0 when every target exists, 1 when any is missing.
+# Exit:  0 when every target exists; 1 when any is missing, a named file is
+#        missing, or no Markdown file was found to check.
 #
 # Portable: bash 3.2+, POSIX tools only; runs on macOS and Alpine.
 set -euo pipefail
@@ -23,7 +24,11 @@ fence_re='^[[:space:]]*(> )?```'
 
 check_file() {
   local file="$1" dir line lineno rest target path in_fence
-  [ -f "$file" ] || return 0
+  if [ ! -f "$file" ]; then
+    printf '%s: no such file\n' "$file"
+    status=1
+    return 0
+  fi
   checked=$((checked + 1))
   dir="$(dirname "$file")"
   lineno=0
@@ -66,6 +71,13 @@ else
   while IFS= read -r f; do
     check_file "$f"
   done < <(git ls-files -- '*.md')
+fi
+
+if [ "$checked" -eq 0 ] && [ "$status" -eq 0 ]; then
+  # Nothing checked (not a Git checkout, git failed, or no tracked *.md):
+  # an empty run must not report success.
+  printf 'check-md-links: no Markdown files found to check\n' >&2
+  exit 1
 fi
 
 if [ "$status" -ne 0 ]; then

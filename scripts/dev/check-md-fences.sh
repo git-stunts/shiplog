@@ -6,7 +6,8 @@
 # opened and never closed, so everything after it renders as code.
 #
 # Usage: scripts/dev/check-md-fences.sh [FILE...]
-# Exit:  0 when every file is balanced, 1 when any file is not.
+# Exit:  0 when every file is balanced; 1 when any file is not, a named file is
+#        missing, or no Markdown file was found to check.
 #
 # Portable: bash 3.2+, POSIX grep/sed; runs on macOS and Alpine.
 set -euo pipefail
@@ -19,7 +20,11 @@ checked=0
 
 check_file() {
   local file="$1" count
-  [ -f "$file" ] || return 0
+  if [ ! -f "$file" ]; then
+    printf '%s: no such file\n' "$file"
+    status=1
+    return 0
+  fi
   checked=$((checked + 1))
   count=$(grep -cE '^[[:space:]]*(> )?```' "$file" || true)
   if [ $((count % 2)) -ne 0 ]; then
@@ -34,6 +39,13 @@ else
   while IFS= read -r f; do
     check_file "$f"
   done < <(git ls-files -- '*.md')
+fi
+
+if [ "$checked" -eq 0 ] && [ "$status" -eq 0 ]; then
+  # Nothing checked (not a Git checkout, git failed, or no tracked *.md):
+  # an empty run must not report success.
+  printf 'check-md-fences: no Markdown files found to check\n' >&2
+  exit 1
 fi
 
 if [ "$status" -ne 0 ]; then
