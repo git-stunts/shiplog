@@ -288,6 +288,9 @@ self_test() {
   { st_line '- [x] G1: one' && st_line '- [x] G2: two'; } || { echo "self-test: --goal --update touched other goals"; rc=1; }
   st_run --goal G9 --update; local st_rc=$?
   { [ "$st_rc" -eq 2 ] && [ ! -e "$ST_DIR/edited.md" ]; } || { echo "self-test: unknown --goal not rejected (exit $st_rc)"; rc=1; }
+  # A reopened issue's row is unticked; closed rows are ticked.
+  st_run --update
+  { st_line '- [ ] #11 eleven' && st_line '- [x] #12'; } || { echo "self-test: reopened issue row stays ticked"; rc=1; }
   # A failed CI lookup is a tooling error, not a red main: no edit, exit 2.
   : > "$ST_DIR/run_fail"
   st_run --update; st_rc=$?
@@ -384,7 +387,7 @@ if [ "$UPDATE" -eq 1 ]; then
     GOAL_BOX[$g]=$([ "$s" = pass ] && echo x || echo ' ')
   done
   for n in "${!ISSUE_STATE[@]}"; do
-    [ "${ISSUE_STATE[$n]}" = CLOSED ] && ISSUE_BOX[$n]=x
+    case "${ISSUE_STATE[$n]}" in CLOSED) ISSUE_BOX[$n]=x ;; OPEN) ISSUE_BOX[$n]=' ' ;; esac
   done
   stamp="_Last roadmap-check: $(date -u +%Y-%m-%dT%H:%MZ) · $(git rev-parse --short HEAD)_"
   new=$(render_body) && [ -n "$new" ] || { echo "cannot update #$ISSUE: body transformation failed" >&2; exit 2; }
