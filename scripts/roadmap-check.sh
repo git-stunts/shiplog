@@ -129,9 +129,12 @@ chk_exec_bits() { # dirs...
 }
 chk_issues_closed() { # comma list
   [ "$GH_OK" -eq 1 ] || { echo "gh unavailable"; return 2; }
-  local open=() n
+  local open=() n r
   IFS=, read -ra nums <<< "$1"
-  for n in "${nums[@]}"; do issue_closed "$n" || open+=("#$n"); done
+  for n in "${nums[@]}"; do
+    issue_closed "$n"; r=$?
+    case $r in 0) ;; 1) open+=("#$n") ;; *) echo "gh error on #$n"; return 2 ;; esac
+  done
   [ ${#open[@]} -eq 0 ] && echo "${#nums[@]} closed" || { echo "open: ${open[*]}"; return 1; }
 }
 chk_label_all_closed() { # label
@@ -255,7 +258,7 @@ EOF
 }
 st_run() { # args... -> child exit code; an edited body lands in $ST_DIR/edited.md
   rm -f "$ST_DIR/edited.md"
-  PATH="$ST_DIR/bin:$PATH" FAKE_GH_DIR="$ST_DIR" ROADMAP_CHECK_ROADMAP="$ST_DIR/roadmap.md" \
+  PATH="$ST_DIR/bin:$PATH" FAKE_GH_DIR="$ST_DIR" ROADMAP_CHECK_ROADMAP="${ST_ROADMAP:-$ST_DIR/roadmap.md}" \
     bash "$ROOT/scripts/roadmap-check.sh" --issue 155 "$@" >/dev/null 2>&1
 }
 st_line() { grep -qxF -- "$1" "$ST_DIR/edited.md" 2>/dev/null; }
@@ -302,6 +305,10 @@ self_test() {
   # A failed body lookup for another issue is a skip (tooling), not a fail.
   ( export PATH="$ST_DIR/bin:$PATH" FAKE_GH_DIR="$ST_DIR"; GH_OK=1; chk_issue_body 999 x >/dev/null ); st_rc=$?
   [ "$st_rc" -eq 2 ] || { echo "self-test: issue-body lookup failure reported as exit $st_rc, want 2"; rc=1; }
+  # A GitHub lookup error inside a check aborts --update instead of unticking the goal.
+  { cat "$ST_DIR/roadmap.md"; printf '%s\n' '## G4: four' '### Definition of done' '- `issues-closed:10,999`'; } > "$ST_DIR/roadmap4.md"
+  ST_ROADMAP="$ST_DIR/roadmap4.md" st_run --update; st_rc=$?
+  { [ "$st_rc" -eq 2 ] && [ ! -e "$ST_DIR/edited.md" ]; } || { echo "self-test: lookup error during --update not treated as tooling error (exit $st_rc)"; rc=1; }
   # A failed CI lookup is a tooling error, not a red main: no edit, exit 2.
   : > "$ST_DIR/run_fail"
   st_run --update; st_rc=$?
@@ -391,6 +398,10 @@ render_body() {
 
 if [ "$UPDATE" -eq 1 ]; then
   if [ "$GH_OK" -ne 1 ]; then echo "cannot update #$ISSUE: gh unavailable" >&2; exit 2; fi
+  for r in "${RESULTS[@]}"; do
+    IFS=$'\t' read -r g st c d <<< "$r"
+    [ "$st" != skip ] || { echo "cannot update #$ISSUE: $g check skipped ($c: $d)" >&2; exit 2; }
+  done
   declare -A GOAL_BOX=() ISSUE_BOX=()
   for g in "${GOALS[@]}"; do
     [ -z "$ONLY_GOAL" ] || [ "$g" = "$ONLY_GOAL" ] || continue
