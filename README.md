@@ -179,7 +179,7 @@ Honest answer, because the hosting world is split in two:
 | You host on | Server-side hooks? | What enforces Shiplog policy |
 |---|---|---|
 | **Self-hosted** Git (GitLab, Gitea, Gerrit, GHE server, bare repo over SSH) | Yes | Install [`contrib/hooks/pre-receive.shiplog`](./contrib/hooks/pre-receive.shiplog). Set `receive.denyDeletes`. Policy, trust and fast-forward rules are checked on every push. |
-| **GitHub.com / SaaS** | No custom hooks | Move Shiplog refs under `refs/heads/_shiplog/**` so **branch rulesets** apply, and run `git shiplog verify` as a **required status check**. Templates in [`docs/examples/github/`](./docs/examples/github/). |
+| **GitHub.com / SaaS** | No custom hooks | Move Shiplog refs under `refs/heads/_shiplog/**` so **branch rulesets** apply, and make the journal and trust verify workflows **required status checks**. Templates in [`docs/examples/github/`](./docs/examples/github/). |
 
 Either way the ledger is the same bytes. Only the bouncer changes. The full matrix: [`docs/hosting/matrix.md`](./docs/hosting/matrix.md).
 
@@ -189,15 +189,15 @@ Either way the ledger is the same bytes. Only the bouncer changes. The full matr
 
 | Command | What it does |
 |---|---|
-| `git shiplog init` | Configure the repo (fetch refspecs; nothing pushed) |
-| `git shiplog run [-- cmd…]` | Run a command; record outcome, timing and log |
+| `git shiplog init` | Add fetch and push refspecs for the ref root to your remote and enable reflogs; nothing is pushed, but a plain `git push` now sends Shiplog refs too ([#140](https://github.com/git-stunts/shiplog/issues/140)) |
+| `git shiplog run --service S [-- cmd…]` | Run a command; record outcome, timing and log |
 | `git shiplog write [ENV]` | Record an entry by hand |
-| `git shiplog append --json '{…}'` | Append an entry from structured input (automation) |
-| `git shiplog ls [--env E]` | List entries |
+| `git shiplog append --service S --status S --json '{…}'` | Append an entry without prompts; `--json` adds your own fields beside the core trailer |
+| `git shiplog ls [ENV] [LIMIT]` | List entries |
 | `git shiplog show [SHA] [--json]` | One entry with its attached log |
-| `git shiplog export-json` | NDJSON stream of a journal |
+| `git shiplog export-json [ENV]` | NDJSON stream of a journal |
 | `git shiplog verify [ENV]` | Check authors and signatures against policy |
-| `git shiplog publish [--env E] [--all] [--policy] [--trust]` | Push Shiplog refs (and nothing else) |
+| `git shiplog publish [ENV] [--all] [--policy] [--trust]` | Push Shiplog refs (and nothing else) |
 | `git shiplog policy show\|validate\|require-signed` | Inspect and edit policy |
 | `git shiplog trust show\|sync` | Inspect the roster; export `allowed_signers` |
 | `git shiplog setup` / `config --interactive` | Wizards: strictness level, host-aware plan, `--apply` |
