@@ -94,6 +94,8 @@ The CLI setup wizard supports this via `--strict-envs "prod staging"`.
 git push origin refs/_shiplog/policy/current
 ```
 
+Per-environment entries win over the global value: an environment with `deployment_requirements.<env>.require_signed: true` (or one that inherits it from `deployment_requirements.default`) still requires signatures after the global value becomes `false`. To disable signing everywhere, also remove those entries or set them to `false`.
+
 ### 2. Clients stop signing automatically
 
 - CLI default is unsigned; remove `SHIPLOG_SIGN=1` if you were setting it.
