@@ -26,7 +26,7 @@ SHIPLOG_SETUP_AUTO_PUSH=1 \
 
 When bootstrapping trust, you can pick how quorum signatures are recorded and verified:
 
-- `chain` — co‑sign chain of commits (pure Git; great with server hooks)
+- `chain` — one signed trust commit (pure Git; threshold 1 only)
 - `attestation` — detached signatures stored under `.shiplog/trust_sigs/` (great for PRs on SaaS hosts)
 
 Set explicitly via flags or env during setup/bootstrap:
@@ -42,15 +42,17 @@ See docs/TRUST.md for details and a comparison.
 
 - Open (unsigned):
   - Policy: `require_signed=false`.
+  - Allowlist: none, unless `--authors` / `SHIPLOG_SETUP_AUTHORS` is given (then `authors.default_allowlist` holds exactly those emails).
   - Use when adopting Shiplog quickly or experimenting.
 
 - Balanced (unsigned + allowlist):
   - Policy: `require_signed=false`, with `authors.default_allowlist` populated.
-  - Wizard includes your current `git config user.email` and any emails from `SHIPLOG_SETUP_AUTHORS`.
+  - Allowlist: your current `git config user.email` plus any emails from `--authors` / `SHIPLOG_SETUP_AUTHORS`.
 
 - Strict (signed):
   - Global strict: `require_signed=true` for all environments.
   - Per‑environment strict: `require_signed=false` globally and `deployment_requirements.<env>.require_signed=true` for selected envs (e.g., prod only).
+  - Allowlist: the emails from `--authors` / `SHIPLOG_SETUP_AUTHORS`; when absent, your current `git config user.email`.
   - Non‑interactive trust bootstrap supported via `SHIPLOG_TRUST_*` env vars (see docs/features/modes.md). The wizard runs the bootstrap script and can auto‑push the trust ref with `--auto-push`.
   - Signing mode: pass `--trust-sig-mode chain|attestation` (default `chain`).
 

@@ -26,7 +26,7 @@ install_hook_with_gate() {
     'export SHIPLOG_REQUIRE_SIGNED_TRUST=1' \
     'export SHIPLOG_REQUIRE_SIGNED_TRUST_MODE=either' \
     'export SHIPLOG_DEBUG_SSH_VERIFY=1' \
-    'exec /bin/bash "$0.real" "$@"' > "$REMOTE_DIR/hooks/pre-receive"
+    'exec /usr/bin/env bash "$0.real" "$@"' > "$REMOTE_DIR/hooks/pre-receive"
   chmod +x "$REMOTE_DIR/hooks/pre-receive" "$REMOTE_DIR/hooks/pre-receive.real"
 }
 
@@ -64,7 +64,7 @@ JSON
   # Produce an attestation signature as a fallback under 'either' mode
   priv="$(git config user.signingkey)"
   base=$(printf "100644 blob %s${tab}trust.json\n100644 blob %s${tab}allowed_signers\n" "$oid_trust" "$oid_sigs" | git mktree)
-  printf 'shiplog-trust-tree-v1\n%s\n%s\n%s\n' "$base" "shiplog-trust-root" "1" > payload.txt
+  printf 'shiplog-trust-tree-v2\n%s\n%s\n%s\n%s\n' "$base" "shiplog-trust-root" "1" "0000000000000000000000000000000000000000" > payload.txt
   ssh-keygen -Y sign -q -f "$priv" -n shiplog-trust payload.txt >/dev/null
   mkdir -p .shiplog/trust_sigs
   mv payload.txt.sig .shiplog/trust_sigs/shiplog-tester@example.com.sig

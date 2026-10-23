@@ -1,26 +1,76 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Publishes a policy document to the local policy ref as a fast-forward commit
+# (does not push). The document is validated with the canonical validator first;
+# an invalid policy aborts before the ref moves.
+#
+# Signing (SLT.BUG.TOOL.006): SHIPLOG_POLICY_SIGN=1|0 decides whether the commit
+# is signed. When unset, the commit is signed when `git config user.signingkey`
+# is configured and unsigned (with a hint) otherwise. The pre-receive hook
+# requires a maintainer signature on policy updates once a trust ref exists.
+
 POLICY_FILE=${1:-.shiplog/policy.json}
-POLICY_REF=${SHIPLOG_POLICY_REF:-refs/_shiplog/policy/current}
+# Policy ref follows the configured ref root (SHIPLOG_POLICY_REF > SHIPLOG_REF_ROOT >
+# git config shiplog.refRoot > refs/_shiplog). The CLI exports the resolved values.
+POLICY_REF=${SHIPLOG_POLICY_REF:-}
+if [ -z "$POLICY_REF" ]; then
+  POLICY_REF_ROOT="${SHIPLOG_REF_ROOT:-$(git config --get shiplog.refRoot 2>/dev/null || true)}"
+  POLICY_REF_ROOT="${POLICY_REF_ROOT:-refs/_shiplog}"
+  POLICY_REF="${POLICY_REF_ROOT%/}/policy/current"
+fi
 MESSAGE=${SHIPLOG_POLICY_MESSAGE:-"shiplog: update policy"}
-# Default to unsigned policy commits to avoid GPG prompts in CI unless explicitly requested
-SIGN_MODE=${SHIPLOG_POLICY_SIGN:-0}
-SCHEMA_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../examples/policy.schema.json"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ ! -f "$POLICY_FILE" ]; then
   echo "shiplog: policy file $POLICY_FILE not found" >&2
   exit 1
 fi
 
-if [ -f "$SCHEMA_PATH" ] && command -v jq >/dev/null 2>&1 && jq --help 2>&1 | grep -q -- '--schema'; then
-  if ! jq --schema "$SCHEMA_PATH" '.' "$POLICY_FILE" >/dev/null 2>&1; then
-    echo "shiplog: policy file $POLICY_FILE failed schema validation" >&2
-    exit 1
+# --- validate with the real validator (no jq --schema; it does not exist) ------
+VALIDATOR=""
+for candidate in \
+  "${SHIPLOG_HOME:-}/scripts/policy/validate.sh" \
+  "$SCRIPT_DIR/policy/validate.sh"; do
+  case "$candidate" in /scripts/*) continue ;; esac
+  if [ -x "$candidate" ]; then
+    VALIDATOR="$candidate"
+    break
   fi
-else
-  echo "shiplog: schema validation skipped (jq --schema unavailable or schema missing)" >&2
+done
+if [ -z "$VALIDATOR" ]; then
+  echo "shiplog: policy validator not found (expected scripts/policy/validate.sh under SHIPLOG_HOME or next to this script)" >&2
+  exit 66
 fi
+
+validation_output=""
+validation_status=0
+validation_output=$("$VALIDATOR" "$POLICY_FILE" 2>&1) || validation_status=$?
+if [ "$validation_status" -ne 0 ]; then
+  echo "shiplog: policy file $POLICY_FILE failed validation; not publishing" >&2
+  [ -n "$validation_output" ] && printf '%s\n' "$validation_output" >&2
+  exit 1
+fi
+
+# --- signing default --------------------------------------------------------------
+sign_mode=""
+case "${SHIPLOG_POLICY_SIGN:-}" in
+  "")
+    if [ -n "$(git config --get user.signingkey 2>/dev/null || true)" ]; then
+      sign_mode=1
+    else
+      sign_mode=0
+      echo "shiplog: publishing an unsigned policy commit (no user.signingkey configured; set SHIPLOG_POLICY_SIGN=1 and a signing key to sign)" >&2
+    fi
+    ;;
+  1|true|yes|on|TRUE|True|YES|Yes|ON|On) sign_mode=1 ;;
+  0|false|no|off|FALSE|False|NO|No|OFF|Off) sign_mode=0 ;;
+  *)
+    echo "shiplog: SHIPLOG_POLICY_SIGN must be a boolean (1|true|yes|on|0|false|no|off), got '${SHIPLOG_POLICY_SIGN}'" >&2
+    exit 1
+    ;;
+esac
 
 policy_blob=$(git hash-object -w "$POLICY_FILE")
 # Create a tree at .shiplog/policy.json to match server hook expectations
@@ -33,7 +83,7 @@ if [ -n "$parent" ]; then
   commit_args+=( -p "$parent" )
 fi
 
-if [ "$SIGN_MODE" = "0" ]; then
+if [ "$sign_mode" = "0" ]; then
   commit=$(printf '%s\n' "$MESSAGE" | GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-$(git config user.name)}" GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-$(git config user.email)}" git commit-tree "${commit_args[@]}")
 else
   commit=$(printf '%s\n' "$MESSAGE" | git commit-tree "${commit_args[@]}" -S)

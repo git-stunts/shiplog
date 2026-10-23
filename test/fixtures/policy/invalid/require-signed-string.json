@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "require_signed": false,
+  "deployment_requirements": {
+    "prod": {
+      "require_signed": "required"
+    }
+  }
+}

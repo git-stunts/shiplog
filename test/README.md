@@ -14,11 +14,12 @@ The `test/` directory contains the Bats-based integration suite that exercises t
 
 ## Test Runner
 
-- `make test` builds the local Docker image (if needed) and runs all Bats files with signing disabled. The image bakes a snapshot of your working tree into `/workspace` (`COPY . /workspace` in the `Dockerfile`), so a local `make test` runs `/usr/local/bin/run-tests` against that snapshot with nothing bind-mounted. CI (`.github/workflows/ci.yml`) runs the same image with the checkout bind-mounted over `/workspace` (`docker run -v "$PWD":/workspace`) so the container tests the exact commit under test.
+- `make test` builds the local Docker image (if needed) and runs all Bats files. The image bakes a snapshot of your working tree into `/workspace` (`COPY . /workspace` in the `Dockerfile`), so a local `make test` runs `/usr/local/bin/run-tests` against that snapshot with nothing bind-mounted. CI (`.github/workflows/ci.yml`) runs the same image with the checkout bind-mounted over `/workspace` (`docker run -v "$PWD":/workspace`) so the container tests the exact commit under test.
+- Parallel branches or agents can use their own image and container names without changing the defaults: `make test IMAGE=shiplog-tests-g8a CONTAINER_NAME=shiplog-tests-g8a`.
 - The `run-tests` entrypoint copies `/workspace` (snapshot or mount) to a temporary directory, strips any configured Git remotes, and sets `SHIPLOG_HOME` to that copy before executing Bats.
 - Default test mode avoids network clones: `SHIPLOG_USE_LOCAL_SANDBOX=1` (set to `0` only if you explicitly need to hit the remote sandbox).
-- Timeouts: the in-container entrypoint applies a timeout only when `TEST_TIMEOUT_SECS` is set to a positive integer (for example `TEST_TIMEOUT_SECS=180 make test`); when it is unset the run has no timeout. The legacy `test.sh` wrapper still defaults to `180`; [#132](https://github.com/git-stunts/shiplog/issues/132) unifies the two paths. Use a higher value when signing is enabled (`make test-signing`), and capture container logs when a timeout fires. Add `BATS_FLAGS` (e.g., `--print-output-on-failure -T`) for verbose runs.
-- `make test-signing` performs the same flow with `ENABLE_SIGNING=true`, generating a throw‑away GPG key inside the container to exercise signed‑commit verification.
+- There is no timeout by default. `TEST_TIMEOUT_SECS=<seconds> make test` opts in to an in-container `timeout` around Bats; the same rule applies to `test.sh` (ci-matrix) and the Dockerfile entrypoint. `make test` forwards `TEST_TIMEOUT_SECS`, `SHIPLOG_USE_LOCAL_SANDBOX` and `BATS_FLAGS` into the container when they are set. Always capture container logs when a timeout occurs. Add `BATS_FLAGS` (e.g., `--print-output-on-failure -T`) for verbose runs.
+- Signing coverage (`test/06`, `test/14`, `test/18`) generates an SSH key per test via `shiplog_setup_test_signing`; there is no separate signing build or image-level key.
 - The entrypoint installs `bin/git-shiplog` into `/usr/local/bin/git-shiplog` and exports `SHIPLOG_BOSUN_BIN`, then runs Bats (`bats -r`).
 - Each Bats file calls `load helpers/common`, whose `shiplog_install_cli` helper ensures the CLI is present and executable before tests begin.
 
@@ -53,11 +54,11 @@ The `test/` directory contains the Bats-based integration suite that exercises t
   - In non‑TTY, Bosun does not prompt; tests run with safe fallbacks.
 
 - Hanging or very slow tests
-  - Opt in to the timeout guard: `TEST_TIMEOUT_SECS=180 BATS_FLAGS="--print-output-on-failure -T" make test` (raise it when signing is enabled). Capture container logs if the timeout triggers.
+  - Opt in to the timeout guard: `TEST_TIMEOUT_SECS=180 BATS_FLAGS="--print-output-on-failure -T" make test`. Capture container logs if the timeout triggers.
   - Local sandbox (no network clones) is default: `SHIPLOG_USE_LOCAL_SANDBOX=1` (set to `0` only if required).
 
-- “Signing support not enabled” or skipped signing tests
-  - Default runs disable signing. Use `make test-signing` to enable signing paths (generates a throw‑away key in the container).
+- Signing tests fail with “signing precheck failed”
+  - The container needs `ssh-keygen` (present in the default image). Tests set `gpg.format ssh` and a per-test key through `shiplog_setup_test_signing`; nothing is read from your host keys.
 
 - “ssh-keygen: command not found” (matrix containers)
   - The CI matrix images install an SSH client/keygen. If you see this in a custom image, add the package (e.g., `openssh-client` on Debian/Ubuntu; `openssh-clients` on Fedora; `openssh-keygen` on Alpine).
