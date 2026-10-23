@@ -1309,15 +1309,17 @@ cmd_policy() {
           fi
         done
       fi
+      # Capture exit codes with `status=0; out=$(...) || status=$?` so errexit cannot
+      # abort before the diagnostics are printed (SLT.BUG.TRUST.012).
       if [ -n "$validator_bin" ]; then
-        errs=$(printf '%s\n' "$raw_policy" | "$validator_bin" --stdin 2>&1)
-        validator_status=$?
+        validator_status=0
+        errs=$(printf '%s\n' "$raw_policy" | "$validator_bin" --stdin 2>&1) || validator_status=$?
       else
         if [ -z "$validator_filter" ]; then
           die "shiplog: policy validator filter not found (expected scripts/lib/policy_validate.jq)"
         fi
-        errs=$(printf '%s\n' "$raw_policy" | jq -r -f "$validator_filter" 2>&1)
-        validator_status=$?
+        validator_status=0
+        errs=$(printf '%s\n' "$raw_policy" | jq -r -f "$validator_filter" 2>&1) || validator_status=$?
         if [ "$validator_status" -ne 0 ]; then
           if [ -n "$errs" ]; then
             printf '%s\n' "$errs" >&2
@@ -2205,7 +2207,7 @@ cmd_validate_trailer() {
     return 1
   fi
   # Structural validation: required fields and basic types
-  local err jq_output jq_status
+  local err jq_output jq_status=0
   jq_output=$(printf '%s\n' "$json" | jq -r '
     def _validate($msg; $value; $expected; $minlen):
       (try $value catch null) as $v
@@ -2240,8 +2242,7 @@ cmd_validate_trailer() {
       req_nested_int_ge("missing_or_invalid:when.dur_s"; ["when", "dur_s"]; 0)
     ]
     | map(select(length > 0))
-    | .[]' 2>&1)
-  jq_status=$?
+    | .[]' 2>&1) || jq_status=$?
   if [ "$jq_status" -ne 0 ]; then
     [ -n "$jq_output" ] && printf '%s\n' "$jq_output" >&2
     die "shiplog: trailer validation failed (jq status $jq_status)"

@@ -48,25 +48,30 @@ This is a compact reference for key `SHIPLOG_*` environment variables. Most can 
 - `SHIPLOG_SIGN` — Require signing for `write` operations in this session (policy may still require it).
   - Values: `1` or `0` (default)
 
-- `SHIPLOG_REQUIRE_SIGNED_TRUST` — Server‑side gate in the pre‑receive hook to require the trust commit itself to be signed.
-  - Default: `0` (disabled). Recommended `1` in production.
-  - Interacts with threshold verification but is independent of it.
+- `SHIPLOG_REQUIRE_SIGNED_TRUST` — Server‑side gate (hook and `scripts/shiplog-verify-trust.sh`): the trust commit itself must carry a valid signature from a current (prior‑roster) maintainer.
+  - Default: `0`. Recommended `1` in production.
+  - Decides only whether the commit must be signed; the quorum (attestations, or the single signed commit in chain mode) always applies and is never waived.
   - Case‑insensitive: `1|true|yes|on` enables; `0|false|no|off` disables.
 
-- `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE` — How the trust gate is satisfied when enabled.
-  - Values: `commit` (default), `attestation`, `either`.
-  - `commit`: require `git verify-commit` on the trust commit.
-  - `attestation`: require the detached attestation threshold to verify under `.shiplog/trust_sigs/`.
-  - `either`: accept if either commit verification or attestation threshold verification passes.
+- `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE` — **Ignored** (a warning is printed when set). The former `either` shortcut let one commit signature waive the attestation quorum and was removed (decision D1, #113).
 
-- `SHIPLOG_GPG_FORMAT` — Force Git’s `gpg.format` during verification (`ssh` or `openpgp`). Default inherits repo config.
+- `SHIPLOG_ALLOW_TRUST_THRESHOLD_UNENFORCED` — When `1`, the trust quorum is not enforced and a loud warning is printed on every push. The only escape hatch; for staged migrations only.
 
-- `SHIPLOG_DEBUG_SSH_VERIFY` — Verbose debug for trust verification (shared script and hook).
+- `SHIPLOG_REQUIRE_SIGNED_POLICY` — Hook: policy ref updates must be signed by a current maintainer of the trust roster and contain `.shiplog/policy.json`.
+  - Default: `1` when a trust ref exists on the server, `0` otherwise (so a fresh server can receive its first policy before trust).
+
+- `SHIPLOG_ALLOW_REF_DELETE` — Hook: when `1`, deleting a Shiplog ref (`git push origin :refs/_shiplog/...`) is permitted and a warning is logged. Default: deletions are refused.
+
+- `SHIPLOG_SIGN_TRUST` — `scripts/shiplog-bootstrap-trust.sh`: sign the genesis trust commit (`1`) or not (`0`).
+  - Default: `1` when `git config user.signingkey` is set, otherwise `0` with a printed hint. `SHIPLOG_TRUST_SIGN` is a deprecated alias.
+
+- `SHIPLOG_HOME` (server) — Shiplog checkout the hook trusts for `lib/trust-verify.sh`, `scripts/shiplog-verify-trust.sh` and the policy validator. Overrides: `SHIPLOG_TRUST_VERIFY_LIB`, `SHIPLOG_VERIFY_TRUST_BIN` (must be under a safe prefix and not group/world writable, or the push is refused).
+
+- `SHIPLOG_DEBUG_SSH_VERIFY` — Verbose debug for trust verification (shared module, verifier script and hook).
   - Values: `1` or `0` (default)
-  - Prints gate status/mode, principals discovered in `allowed_signers`, signature failure details, attestation payload tree OID, and per‑signature verification results.
+  - Prints the module/verifier paths in use, the roster commit used for the quorum, principals discovered in `allowed_signers`, the payload tree OID and SHA‑256, per‑signature decisions (counted, duplicate key, wildcard, not a maintainer, revoked) and `git verify-commit` output on failure.
 
-- `SHIPLOG_ATTEST_BACKCOMP` — When `1`, the verifier will attempt an alternate payload mode on failure (base vs full tree) for back‑compat signatures.
-  - Default: `0` (off)
+- Removed: `SHIPLOG_GPG_FORMAT` (Git detects the signature type from the signature itself), `SHIPLOG_ATTEST_PAYLOAD_MODE` and `SHIPLOG_ATTEST_BACKCOMP` (a full‑tree payload can never verify once `.sig` files are in the tree).
 
 ## Write Inputs (non-interactive)
 
