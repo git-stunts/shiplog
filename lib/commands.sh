@@ -2569,7 +2569,10 @@ cmd_config() {
     if [ "$q_threshold" -gt 1 ]; then q_sig_mode="attestation"; else q_sig_mode="chain"; fi
   fi
   q_sig_mode="$(printf '%s' "$q_sig_mode" | tr '[:upper:]' '[:lower:]')"
-  case "$q_sig_mode" in chain|attestation) : ;; *) q_sig_mode="chain" ;; esac
+  case "$q_sig_mode" in
+    chain|attestation) : ;;
+    *) die "shiplog: unknown sig_mode '$q_sig_mode' (expected chain or attestation)" ;;
+  esac
   if [ "$q_sig_mode" = "chain" ] && [ "$q_threshold" -gt 1 ]; then
     die "shiplog: sig_mode chain supports threshold 1 only (a commit carries one signature); use sig_mode attestation for threshold $q_threshold (docs/TRUST.md)"
   fi
