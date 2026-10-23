@@ -7,6 +7,7 @@ This runbook shows how to cut a Shiplog MVP release using Shiplog itself. It cov
 - Trust is bootstrapped and pushed to the canonical remote (`refs/_shiplog/trust/root`). Use `scripts/shiplog-bootstrap-trust.sh` if not done yet.
 - Policy exists locally in `.shiplog/policy.json` and is published at `refs/_shiplog/policy/current` (see below).
 - Your workstation has Git 2.35+ and jq 1.6 or newer. Run releases from Docker/Dev Container if unsure.
+- Ref names below use the default root `refs/_shiplog`. If you set `SHIPLOG_REF_ROOT` or `git config shiplog.refRoot` (for example `refs/heads/_shiplog`), substitute that root; the scripts follow it automatically.
 
 ## 1) Sync Allowed Signers
 
@@ -34,7 +35,7 @@ git push origin refs/_shiplog/policy/current
 
 Notes:
 
-- The script validates `.shiplog/policy.json` against `examples/policy.schema.json` when jq’s `--schema` is available.
+- The script validates `.shiplog/policy.json` with the canonical validator (`scripts/policy/validate.sh`) and refuses to move the ref when it fails. It signs the commit when `user.signingkey` is set (override with `SHIPLOG_POLICY_SIGN=1|0`); once a trust ref exists, the pre-receive hook requires a current maintainer's signature on policy updates unless the server sets `SHIPLOG_REQUIRE_SIGNED_POLICY=0`.
 - CI can run the same script after a policy PR merges.
 
 ## 3) Capture Release Logs (optional but recommended)
@@ -99,7 +100,7 @@ git push origin refs/_shiplog/journal/prod
 Use a protected GitHub Environment to store the signing key (SSH preferred). In a release job:
 
 - Check out the repo, load the SSH key to `~/.ssh/id_ed25519`, and configure Git for SSH signatures.
-- `./scripts/shiplog-trust-sync.sh ~/.shiplog/allowed_signers`
+- `./scripts/shiplog-trust-sync.sh refs/_shiplog/trust/root ~/.shiplog/allowed_signers` (the first argument is the trust ref, the second the destination)
 - Stream build/test logs to a file and run `git shiplog --boring --yes write`
 - `git push origin refs/_shiplog/journal/prod`
 
