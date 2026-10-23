@@ -14,6 +14,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 2
+ROADMAP="${ROADMAP_CHECK_ROADMAP:-$ROOT/ROADMAP.md}"
 
 ISSUE=155
 LABEL="audit-2026-10"
@@ -196,13 +197,67 @@ parse_roadmap() {
       spec="${BASH_REMATCH[1]}"
       GOAL_CHECKS[$goal]="${GOAL_CHECKS[$goal]:-}${spec}"$'\n'
     fi
-  done < "$ROOT/ROADMAP.md"
+  done < "$ROADMAP"
   [ ${#GOALS[@]} -gt 0 ] || { echo "no goals parsed from ROADMAP.md" >&2; return 2; }
 }
 
 # ---------------------------------------------------------------------------
 # Self-test: exercise the check kinds against fixtures, no network.
 # ---------------------------------------------------------------------------
+# Fixture runs: a fake gh on PATH, a fixture roadmap, and this script run as a child.
+ST_DIR=""
+st_setup() {
+  ST_DIR=$(mktemp -d)
+  mkdir -p "$ST_DIR/bin"
+  cat > "$ST_DIR/roadmap.md" <<'EOF'
+## G1: one
+### Definition of done
+- `file:ROADMAP.md`
+## G2: two
+### Definition of done
+- `no-file:ROADMAP.md`
+## G3: ci
+### Definition of done
+- `ci-main-green:ci.yml`
+EOF
+  printf '%s\n' 'intro' '- [ ] G1: one' '- [x] G2: two' '- [ ] G3: ci' \
+    '- [ ] #10 ten' '- [x] #11 eleven' '- [ ] #12' '- [ ] #100 not ten' > "$ST_DIR/body.md"
+  printf '%s\n' '[{"number":10,"state":"CLOSED"},{"number":11,"state":"OPEN"},{"number":12,"state":"CLOSED"}]' > "$ST_DIR/issues.json"
+  echo success > "$ST_DIR/run.txt"
+  cat > "$ST_DIR/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+d="$FAKE_GH_DIR"
+case "$1 $2" in
+  "auth status") exit 0 ;;
+  "issue list")
+    case " $* " in
+      *" --state open "*) jq '[.[] | select(.state == "OPEN")] | length' "$d/issues.json" ;;
+      *) cat "$d/issues.json" ;;
+    esac ;;
+  "issue view")
+    if [ "$3" = 155 ]; then cat "$d/body.md"; exit 0; fi
+    s=$(jq -r --argjson n "$3" '.[] | select(.number == $n) | .state' "$d/issues.json")
+    [ -n "$s" ] || exit 1
+    printf '%s\n' "$s" ;;
+  "run list") [ ! -f "$d/run_fail" ] || exit 1; cat "$d/run.txt" ;;
+  "issue edit")
+    while [ $# -gt 0 ]; do
+      [ "$1" = --body ] && { printf '%s' "$2" > "$d/edited.md"; exit 0; }
+      shift
+    done
+    exit 1 ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod +x "$ST_DIR/bin/gh"
+}
+st_run() { # args... -> child exit code; an edited body lands in $ST_DIR/edited.md
+  rm -f "$ST_DIR/edited.md"
+  PATH="$ST_DIR/bin:$PATH" FAKE_GH_DIR="$ST_DIR" ROADMAP_CHECK_ROADMAP="$ST_DIR/roadmap.md" \
+    bash "$ROOT/scripts/roadmap-check.sh" --issue 155 "$@" >/dev/null 2>&1
+}
+st_line() { grep -qxF -- "$1" "$ST_DIR/edited.md" 2>/dev/null; }
+
 self_test() {
   local t rc=0; t=$(mktemp -d)
   printf 'alpha\nbeta\n' > "$t/f.txt"; : > "$t/a.json"; : > "$t/b.json"
@@ -221,6 +276,14 @@ self_test() {
   [ "${#GOALS[@]}" -ge 9 ] || { echo "self-test: expected >= 9 goals, got ${#GOALS[@]}"; rc=1; }
   [ -n "${GOAL_CHECKS[G1]:-}" ] || { echo "self-test: G1 has no checks"; rc=1; }
   rm -rf "$t"
+  st_setup
+  # Issue updates need no perl, and a failed transformation must not reach gh issue edit.
+  printf '#!/bin/sh\nexit 127\n' > "$ST_DIR/bin/perl"; chmod +x "$ST_DIR/bin/perl"
+  st_run --update
+  { st_line 'intro' && st_line '- [x] G1: one' && st_line '- [x] #10 ten' && st_line '- [ ] #100 not ten'; } \
+    || { echo "self-test: update without perl"; rc=1; }
+  rm -f "$ST_DIR/bin/perl"
+  rm -rf "$ST_DIR"
   [ $rc -eq 0 ] && echo "self-test: ok"
   return $rc
 }
@@ -282,24 +345,35 @@ fi
 # ---------------------------------------------------------------------------
 # Update the tracking issue: tick goal lines and closed-issue rows.
 # ---------------------------------------------------------------------------
+# Rewrite TRACKING_BODY line by line: goal rows from GOAL_BOX, issue rows from ISSUE_BOX,
+# and the stamp line (appended when absent). Pure bash, so a missing tool cannot blank it.
+render_body() {
+  local line seen=0 re_goal='^- \[[ x]\] (G[0-9]+):' re_issue='^- \[[ x]\] #([0-9]+)([^0-9]|$)'
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ $re_goal ]] && [ -n "${GOAL_BOX[${BASH_REMATCH[1]}]:-}" ]; then
+      line="- [${GOAL_BOX[${BASH_REMATCH[1]}]}]${line:5}"
+    elif [[ "$line" =~ $re_issue ]] && [ -n "${ISSUE_BOX[${BASH_REMATCH[1]}]:-}" ]; then
+      line="- [${ISSUE_BOX[${BASH_REMATCH[1]}]}]${line:5}"
+    elif [[ "$line" == "_Last roadmap-check:"* ]]; then
+      line="$stamp"; seen=1
+    fi
+    printf '%s\n' "$line"
+  done <<< "$TRACKING_BODY"
+  [ "$seen" -eq 1 ] || printf '\n%s\n' "$stamp"
+}
+
 if [ "$UPDATE" -eq 1 ]; then
   if [ "$GH_OK" -ne 1 ]; then echo "cannot update #$ISSUE: gh unavailable" >&2; exit 2; fi
-  new="$TRACKING_BODY"
+  declare -A GOAL_BOX=() ISSUE_BOX=()
   for g in "${GOALS[@]}"; do
     s=$(goal_status "$g")
-    box=$([ "$s" = pass ] && echo x || echo ' ')
-    new=$(printf '%s\n' "$new" | perl -pe "s/^- \[[ x]\] \Q$g\E:/- [$box] $g:/")
+    GOAL_BOX[$g]=$([ "$s" = pass ] && echo x || echo ' ')
   done
   for n in "${!ISSUE_STATE[@]}"; do
-    [ "${ISSUE_STATE[$n]}" = CLOSED ] || continue
-    new=$(printf '%s\n' "$new" | perl -pe "s/^- \[ \] #$n\b/- [x] #$n/")
+    [ "${ISSUE_STATE[$n]}" = CLOSED ] && ISSUE_BOX[$n]=x
   done
   stamp="_Last roadmap-check: $(date -u +%Y-%m-%dT%H:%MZ) · $(git rev-parse --short HEAD)_"
-  if printf '%s' "$new" | grep -q '^_Last roadmap-check:'; then
-    new=$(printf '%s\n' "$new" | perl -pe "s/^_Last roadmap-check:.*\$/$stamp/")
-  else
-    new=$(printf '%s\n\n%s\n' "$new" "$stamp")
-  fi
+  new=$(render_body) && [ -n "$new" ] || { echo "cannot update #$ISSUE: body transformation failed" >&2; exit 2; }
   if [ "$new" != "$TRACKING_BODY" ]; then
     gh issue edit "$ISSUE" --body "$new" >/dev/null && echo "updated #$ISSUE" || { echo "failed to update #$ISSUE" >&2; exit 2; }
   else
