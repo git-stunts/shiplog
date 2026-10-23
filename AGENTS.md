@@ -21,7 +21,7 @@ How to run tests safely (Dockerized):
 - Tests default to `SHIPLOG_USE_LOCAL_SANDBOX=1` (no network clones); set it to `0`
   only when you explicitly need the remote sandbox repo.
 - Timeouts, `BATS_FLAGS`, and how to run a single file: see `test/README.md`
-  (#132 unifies the timeout default; do not restate it here).
+  (one rule since #132: no timeout unless `TEST_TIMEOUT_SECS` is set; do not restate details here).
 
 ## Where the plan lives
 
