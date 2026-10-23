@@ -115,3 +115,33 @@ teardown() {
   [ ! -e "$SHIM_BIN/shiplog" ]
   [ -e "$OTHER_BIN/bosun" ]
 }
+
+@test "uninstall honors shiplog.refRoot for refspecs and the unpublished-refs check" {
+  local script_path branch_root="refs/heads/_shiplog" remote
+  script_path="${BATS_TEST_DIRNAME}/../scripts/uninstall-shiplog.sh"
+  unset SHIPLOG_REF_ROOT
+  git config shiplog.refRoot "$branch_root"
+  git shiplog init >/dev/null
+  [[ "$(git config --get-all remote.origin.fetch)" == *"$branch_root/*"* ]]
+
+  remote=$(mktemp -d)
+  git init -q --bare "$remote"
+  git config remote.origin.url "$remote"
+  git update-ref "$branch_root/journal/prod" HEAD
+
+  # A journal under the configured root that the remote lacks blocks uninstall.
+  run "$script_path" --silent
+  echo "unpublished: $output" >&2
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$branch_root/journal/prod"* ]]
+  [ -d "$HOME/.shiplog" ]
+
+  git push -q "$remote" "$branch_root/journal/prod"
+  run "$script_path" --silent
+  echo "published: $output" >&2
+  rm -rf "$remote"
+  [ "$status" -eq 0 ]
+  [ ! -d "$HOME/.shiplog" ]
+  [[ "$(git config --get-all remote.origin.fetch 2>/dev/null || true)" != *"$branch_root"* ]]
+  [[ "$(git config --get-all remote.origin.push 2>/dev/null || true)" != *"$branch_root"* ]]
+}
