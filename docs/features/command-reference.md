@@ -10,7 +10,8 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
 - `--no-push` / `--push` — Control auto-push behavior for commands that push refs.
 - `--dry-run[=VALUE]` — Preview actions without updating Shiplog journals or notes (`SHIPLOG_DRY_RUN=1`). `VALUE` accepts `1|true|yes|on|0|false|no|off` (any case); anything else is an error.
 - `--version` `-V` — Print version and exit.
-- `--help` `-h` — Show usage.
+- `--help` `-h` — Show usage. Before the command name this prints the global usage; after it (`git shiplog write --help`) it prints that command's own options. Every command accepts `--help`/`-h` and exits 0.
+- Flags that take a value (`--service`, `--json`, `--env`, ...) fail with `<flag> requires a value` when the value is missing; unknown flags are errors, never silently dropped.
 
 ## Commands
 
@@ -40,7 +41,8 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
     - Interactive: `git shiplog write prod`
     - Non-interactive: `SHIPLOG_BORING=1 git shiplog --yes write prod`
   - Env: `SHIPLOG_SERVICE`, `SHIPLOG_STATUS`, `SHIPLOG_REASON`, `SHIPLOG_TICKET`, `SHIPLOG_REGION`, `SHIPLOG_CLUSTER`, `SHIPLOG_NAMESPACE`, `SHIPLOG_IMAGE`, `SHIPLOG_TAG`, `SHIPLOG_RUN_URL`, `SHIPLOG_LOG`, `SHIPLOG_AUTO_PUSH`.
-  - Flags: accepts `--dry-run` to preview the entry after prompts without appending to the journal or pushing notes.
+  - Flags: accepts `--dry-run` to preview the entry after prompts without appending to the journal or pushing notes. Unknown flags are errors (`unknown write option: --log`); they are never promoted to an ENV.
+  - ENV: positional `ENV` > `--env` > `SHIPLOG_ENV` > `prod`. Only one positional is accepted. The name must pass `git check-ref-format --allow-onelevel` and may not contain whitespace or `..` or start with `-`.
   - Effects: honors allowlists/signing per policy; pushes journal (+notes) to origin unless disabled.
 
 - `append [OPTIONS]`
@@ -55,7 +57,7 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
     - Success case: `git shiplog run --service deploy --reason "Smoke test" -- env printf hi`
     - Failure case: `git shiplog run --service deploy --status-failure failed -- false`
   - Flags: `--service`, `--reason`, `--status-success`, `--status-failure`, `--ticket`, `--region`, `--cluster`, `--namespace`, `--env`, `--dry-run`.
-  - Notes: captures stdout/stderr to a temporary log that is attached as a git note (skipped if empty) and merges `{run:{...}}` into the JSON trailer via `SHIPLOG_EXTRA_JSON`. Prints a minimal confirmation after the run (default `🪵`), configurable via `SHIPLOG_CONFIRM_TEXT`. `--dry-run` prints the command that would execute and exits without running it or writing a journal entry. See `docs/features/run.md` for details.
+  - Notes: everything after `--` is the wrapped command, including a first word that starts with `-` (`git shiplog run --service t -- --version`). Captures stdout/stderr to a temporary log that is attached as a git note (skipped if empty) and merges `{run:{...}}` into the JSON trailer via `SHIPLOG_EXTRA_JSON`. Prints a minimal confirmation after the run (default `🪵`), configurable via `SHIPLOG_CONFIRM_TEXT`. `--dry-run` prints the command that would execute and exits without running it or writing a journal entry. See `docs/features/run.md` for details.
 
 - `ls [ENV] [LIMIT]`
   - Purpose: list recent entries.
@@ -68,26 +70,31 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
     - Latest (default env): `git shiplog show`
     - JSON only: `git shiplog show --json`
     - Compact JSON: `git shiplog show --json-compact`
-  - Notes: defaults to latest at `refs/_shiplog/journal/<ENV>`; fails if no trailer.
+    - Flags after the target: `git shiplog show <sha> --json`
+  - Notes: defaults to latest at `refs/_shiplog/journal/<ENV>`; fails if no trailer. Flags may appear before or after the target; one target at most; unknown flags are errors.
 
 - `validate-trailer [COMMIT]`
   - Purpose: validate an entry’s JSON trailer.
   - Usage: `git shiplog validate-trailer <commit-or-ref>`
   - Exit: 0 on valid; non-zero with errors on invalid.
 
-- `verify [ENV]`
+- `verify [ENV] [--allow-empty]`
   - Purpose: verify signatures/authors for entries in a journal.
   - Usage: `git shiplog verify prod`
   - Output: `Verified: OK=<n>, BadSig=<n>, Unauthorized=<n>`; non-zero exit if any issues.
+  - Exit: non-zero when the journal ref does not exist (`journal refs/_shiplog/journal/<ENV> not found`), when any entry has a bad signature or unauthorized author, or when `OK=0`. Pass `--allow-empty` to accept an empty result as success.
 
-- `export-json [ENV]`
-  - Purpose: NDJSON export; each line is trailer + `commit` field + `notes` (`{ref, attached}`: the resolved notes ref and whether a log note exists for the entry there).
+- `export-json [ENV] [--lenient]`
+  - Purpose: NDJSON export; one line per journal commit, newest first. A valid entry is its trailer + `commit` field + `notes` (`{ref, attached}`: the resolved notes ref and whether a log note exists for the entry there).
   - Usage: `git shiplog export-json prod | jq '.'`
+  - Malformed entries: a commit whose trailer is missing or not a JSON object is emitted as `{"commit":"<sha>","error":"invalid trailer","subject":"<first message line>"}` and the export continues.
+  - Exit: 0 when every entry was valid; 3 when any entry was flagged, unless `--lenient` is passed (then 0). A missing journal is an error.
   - Requires: `jq`.
 
-- `publish [ENV] [--no-notes] [--policy] [--trust] [--all]`
+- `publish [ENV] [--env ENV] [--no-notes] [--policy] [--trust] [--all]`
   - Purpose: push Shiplog refs (journals/notes, and optionally policy/trust) to the configured remote without writing a new entry.
-  - Usage: `git shiplog publish` (current env), `git shiplog publish --env prod`, `git shiplog publish --all --policy --trust`
+  - Usage: `git shiplog publish` (current env), `git shiplog publish staging`, `git shiplog publish --env prod`, `git shiplog publish --all --policy --trust`
+  - ENV: positional `ENV` > `--env` > `SHIPLOG_ENV` > `prod`. A second positional is an error. The output names the refs that were pushed.
   - Order: trust, then policy, then journals, then notes, so a server running the pre-receive hook validates journals against the trust and policy it already has.
   - Notes ref: the same resolved ref `write` used (`SHIPLOG_NOTES_REF` > policy `notes_ref` > `<ref root>/notes/logs`). If entries claim `log_attached=true` but that ref does not exist locally, `publish` fails instead of silently publishing journals without their logs.
   - Fails loudly: a failed push of any requested ref (or `--policy`/`--trust` when the ref is missing locally) is an error, not a silent skip.
@@ -128,7 +135,7 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
 
 - `setup [--strictness open|balanced|strict] [--authors "a@x b@y"] [--strict-envs "prod staging"] [--auto-push|--no-auto-push] [--dry-run] [TRUST_OPTS...]`
   - Purpose: write `.shiplog/policy.json`, sync local policy ref, optionally bootstrap trust and push.
-  - Env: `SHIPLOG_SETUP_STRICTNESS`, `SHIPLOG_SETUP_AUTHORS`, `SHIPLOG_SETUP_STRICT_ENVS`, `SHIPLOG_SETUP_AUTO_PUSH`, `SHIPLOG_SETUP_DRY_RUN`.
+  - Env: `SHIPLOG_SETUP_STRICTNESS`, `SHIPLOG_SETUP_AUTHORS`, `SHIPLOG_SETUP_STRICT_ENVS`, `SHIPLOG_SETUP_AUTO_PUSH`, `SHIPLOG_SETUP_DRY_RUN`. An explicit `--auto-push`/`--no-auto-push` flag wins over `SHIPLOG_SETUP_AUTO_PUSH`.
   - Trust options: `--trust-id`, `--trust-threshold`, `--trust-maintainer`, `--trust-message`.
 
 ## See Also
