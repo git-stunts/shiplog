@@ -97,3 +97,21 @@ teardown() {
   [ "$status" -ne 0 ]
   [ -f "$HOME/.test_profile.shiplog.bak" ]
 }
+
+@test "uninstall removes a copied shim on systems without cmp (arch/fedora base images)" {
+  # Shadow cmp with a stub that fails like a missing binary.
+  printf '#!/bin/sh\nexit 127\n' > "$SHIM_BIN/cmp"
+  chmod +x "$SHIM_BIN/cmp"
+  # Control: an unrelated file named like a shim must survive.
+  OTHER_BIN="$BATS_TEST_TMPDIR/other"
+  mkdir -p "$OTHER_BIN"
+  printf '#!/bin/sh\necho not shiplog\n' > "$OTHER_BIN/bosun"
+  chmod +x "$OTHER_BIN/bosun"
+  rm -f "$SHIM_BIN/bosun"
+  export PATH="$SHIM_BIN:$OTHER_BIN:$PATH"
+
+  run "${BATS_TEST_DIRNAME}/../scripts/uninstall-shiplog.sh" --silent
+  [ "$status" -eq 0 ]
+  [ ! -e "$SHIM_BIN/shiplog" ]
+  [ -e "$OTHER_BIN/bosun" ]
+}

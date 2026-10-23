@@ -255,6 +255,16 @@ if [ ${#unknown_refs[@]} -gt 0 ] && [ "$SILENT" -ne 1 ]; then
   log "Could not verify publication of: ${unknown_refs[*]} (remote unreachable). Local refs in this repository are not removed by the uninstaller."
 fi
 
+# same_content A B: both are regular files with identical bytes. Uses git (a hard
+# dependency) rather than cmp, which minimal arch/fedora images do not ship.
+same_content() {
+  [ -f "$1" ] && [ -f "$2" ] || return 1
+  local a b
+  a=$(git hash-object --no-filters -- "$1" 2>/dev/null) || return 1
+  b=$(git hash-object --no-filters -- "$2" 2>/dev/null) || return 1
+  [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
 GIT_SHIPLOG_TARGET="$INSTALL_DIR/bin/git-shiplog"
 BOSUN_TARGET="$INSTALL_DIR/scripts/bosun"
 
@@ -262,7 +272,7 @@ if [ -e "/usr/local/bin/git-shiplog" ]; then
   if [ -L "/usr/local/bin/git-shiplog" ] && [ "$(readlink "/usr/local/bin/git-shiplog")" = "$GIT_SHIPLOG_TARGET" ]; then
     log "Removing /usr/local/bin/git-shiplog"
     run rm -f /usr/local/bin/git-shiplog
-  elif cmp -s "/usr/local/bin/git-shiplog" "$GIT_SHIPLOG_TARGET" 2>/dev/null; then
+  elif same_content "/usr/local/bin/git-shiplog" "$GIT_SHIPLOG_TARGET"; then
     log "Removing /usr/local/bin/git-shiplog (matching installed copy)"
     run rm -f /usr/local/bin/git-shiplog
   else
@@ -278,7 +288,7 @@ for shim in shiplog bosun; do
     if [ -L "$shim_path" ] && [ "$(readlink "$shim_path")" = "$target" ]; then
       log "Removing $shim shim at $shim_path"
       run rm -f "$shim_path"
-    elif cmp -s "$shim_path" "$target" 2>/dev/null; then
+    elif same_content "$shim_path" "$target"; then
       log "Removing $shim shim at $shim_path (matching installed copy)"
       run rm -f "$shim_path"
     fi
