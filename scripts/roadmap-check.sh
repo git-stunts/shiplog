@@ -283,6 +283,11 @@ self_test() {
   { st_line 'intro' && st_line '- [x] G1: one' && st_line '- [x] #10 ten' && st_line '- [ ] #100 not ten'; } \
     || { echo "self-test: update without perl"; rc=1; }
   rm -f "$ST_DIR/bin/perl"
+  # --goal limits --update to that goal; an unknown goal is rejected before any edit.
+  st_run --goal G1 --update
+  { st_line '- [x] G1: one' && st_line '- [x] G2: two'; } || { echo "self-test: --goal --update touched other goals"; rc=1; }
+  st_run --goal G9 --update; local st_rc=$?
+  { [ "$st_rc" -eq 2 ] && [ ! -e "$ST_DIR/edited.md" ]; } || { echo "self-test: unknown --goal not rejected (exit $st_rc)"; rc=1; }
   rm -rf "$ST_DIR"
   [ $rc -eq 0 ] && echo "self-test: ok"
   return $rc
@@ -294,6 +299,9 @@ if [ "$SELF_TEST" -eq 1 ]; then self_test; exit $?; fi
 # Main
 # ---------------------------------------------------------------------------
 parse_roadmap || exit 2
+if [ -n "$ONLY_GOAL" ] && [ -z "${GOAL_TITLE[$ONLY_GOAL]+set}" ]; then
+  echo "unknown goal: $ONLY_GOAL" >&2; exit 2
+fi
 load_gh_data || echo "note: gh unavailable or unauthenticated; issue/CI checks are skipped" >&2
 
 for g in "${GOALS[@]}"; do
@@ -366,6 +374,7 @@ if [ "$UPDATE" -eq 1 ]; then
   if [ "$GH_OK" -ne 1 ]; then echo "cannot update #$ISSUE: gh unavailable" >&2; exit 2; fi
   declare -A GOAL_BOX=() ISSUE_BOX=()
   for g in "${GOALS[@]}"; do
+    [ -z "$ONLY_GOAL" ] || [ "$g" = "$ONLY_GOAL" ] || continue
     s=$(goal_status "$g")
     GOAL_BOX[$g]=$([ "$s" = pass ] && echo x || echo ' ')
   done
