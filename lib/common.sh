@@ -1,16 +1,70 @@
 # shellcheck shell=bash
 # Common utility functions for Shiplog CLI
 
-is_boring() {
-  case "${SHIPLOG_BORING:-0}" in
-    1|true|yes|on) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 die() {
   echo "❌ $*" >&2
   exit 1
+}
+
+# shiplog_parse_bool VALUE
+# Prints 1 for 1|true|yes|on and 0 for 0|false|no|off (case-insensitive).
+# Returns 2 (and prints nothing) for anything else. Every boolean that Shiplog
+# reads from the environment, git config, flags or the policy document goes
+# through this function so that an unrecognized spelling can never be mistaken
+# for "off".
+shiplog_parse_bool() {
+  local raw="${1:-}"
+  case "${raw,,}" in
+    1|true|yes|on) printf '1'; return 0 ;;
+    0|false|no|off) printf '0'; return 0 ;;
+    *) return 2 ;;
+  esac
+}
+
+# shiplog_bool_var VARNAME LABEL VALUE [DEFAULT]
+# Stores the parsed boolean (1/0) in VARNAME. An empty VALUE yields DEFAULT
+# (0 when omitted). An unrecognized VALUE dies naming LABEL and the value so a
+# typo in a security switch fails closed instead of silently disabling it.
+shiplog_bool_var() {
+  local __shiplog_dest="$1" label="$2" raw="${3:-}" default="${4:-0}" parsed
+  if [ -z "$raw" ]; then
+    printf -v "$__shiplog_dest" '%s' "$default"
+    return 0
+  fi
+  if ! parsed=$(shiplog_parse_bool "$raw"); then
+    die "shiplog: $label must be a boolean (1|true|yes|on|0|false|no|off), got '$raw'"
+  fi
+  printf -v "$__shiplog_dest" '%s' "$parsed"
+}
+
+is_boring() {
+  local v
+  shiplog_bool_var v SHIPLOG_BORING "${SHIPLOG_BORING:-}" 0
+  [ "$v" = 1 ]
+}
+
+# shiplog_repo_root
+# Prints the repository root that `.shiplog/*` artifacts resolve against.
+# bin/git-shiplog exports SHIPLOG_REPO_ROOT once; this helper recomputes it when
+# a library is used outside the CLI entry point. Prints nothing (status 1) when
+# no repository can be found.
+shiplog_repo_root() {
+  if [ -n "${SHIPLOG_REPO_ROOT:-}" ]; then
+    printf '%s' "$SHIPLOG_REPO_ROOT"
+    return 0
+  fi
+  local root
+  if root=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$root" ]; then
+    printf '%s' "$root"
+    return 0
+  fi
+  local git_dir
+  if git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null) && [ -n "$git_dir" ]; then
+    # Bare repository: fall back to the directory that holds GIT_DIR.
+    printf '%s' "$(dirname "$git_dir")"
+    return 0
+  fi
+  return 1
 }
 
 need() {
@@ -76,10 +130,9 @@ shiplog_remote_name() {
 }
 
 shiplog_is_dry_run() {
-  case "${SHIPLOG_DRY_RUN:-0}" in
-    1|true|yes|on) return 0 ;;
-    *) return 1 ;;
-  esac
+  local v
+  shiplog_bool_var v SHIPLOG_DRY_RUN "${SHIPLOG_DRY_RUN:-}" 0
+  [ "$v" = 1 ]
 }
 
 shiplog_dry_run_notice() {
@@ -151,7 +204,9 @@ shiplog_prompt_input() {
     if shiplog_have_bosun; then
       local bosun
       bosun=$(shiplog_bosun_bin)
-      if result=$("$bosun" input --placeholder "$placeholder" --value "$value" 2>/dev/null); then
+      # bosun renders its prompt on stderr and prints only the answer on
+      # stdout, so stderr must stay attached to the terminal here.
+      if result=$("$bosun" input --placeholder "$placeholder" --value "$value"); then
         printf '%s\n' "$result"
         _log_prompt_interaction prompt "$placeholder" "$result"
         return
@@ -186,10 +241,11 @@ shiplog_prompt_choice() {
     if shiplog_have_bosun; then
       local bosun
       bosun=$(shiplog_bosun_bin)
+      # The menu is drawn on stderr; stdout carries only the selection.
       if [ -n "$value" ]; then
-        result=$("$bosun" choose --header "$header" --default "$value" "${options[@]}" 2>/dev/null) || true
+        result=$("$bosun" choose --header "$header" --default "$value" "${options[@]}") || true
       else
-        result=$("$bosun" choose --header "$header" "${options[@]}" 2>/dev/null) || true
+        result=$("$bosun" choose --header "$header" "${options[@]}") || true
       fi
     fi
     if [ -z "$result" ]; then
@@ -210,11 +266,22 @@ shiplog_confirm() {
     return 0
   fi
   _log_prompt_interaction confirmation "$prompt" null raw
-  if shiplog_have_bosun && "$(shiplog_bosun_bin)" confirm "$prompt"; then
-    _log_prompt_interaction confirmation "$prompt" true raw
-    return 0
+  if shiplog_have_bosun; then
+    # bosun confirm is tri-state: 0 = yes, 1 = no, 2 = could not prompt (no
+    # terminal). Its stdout ("yes"/"no") is discarded so it never leaks into
+    # the CLI's stdout; the prompt itself is drawn on stderr. Only "could not
+    # prompt" (or a bosun that failed to start) falls back to the plain prompt;
+    # an explicit "no" aborts.
+    local bosun rc=0
+    bosun=$(shiplog_bosun_bin)
+    "$bosun" confirm "$prompt" >/dev/null || rc=$?
+    case "$rc" in
+      0) _log_prompt_interaction confirmation "$prompt" true raw; return 0 ;;
+      1) _log_prompt_interaction confirmation "$prompt" false raw; return 1 ;;
+      *) ;;
+    esac
   fi
-  # Fallback
+  # Fallback: plain prompt on stderr, answer read from stdin
   printf '%s [y/N] ' "$prompt" >&2
   local ans
   IFS= read -r ans || ans=""

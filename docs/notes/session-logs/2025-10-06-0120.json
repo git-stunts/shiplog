@@ -1,0 +1,80 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Merge PR #43 (policy schema alignment)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Document shellcheck suppression policy in CONTRIBUTING (ALPHA.012)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Add README Requirements block (git/jq/bash, ssh-keygen -Y) (ALPHA.002)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Add validate-trailer Bats tests mirroring docs (ALPHA.004)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Docs tidy for ls status + test refs (ALPHA.021)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Improve trust bootstrap repo hint (ALPHA.018)"
+    }
+  ],
+  "date": "2025-10-06",
+  "key_decisions": [
+    "Keep deployment_requirements and ff_only in schema but optional",
+    "Allow env-level require_signed in schema",
+    "Writers standardize on version \"1.0.0\"",
+    "Gate AJV only on policy-related changes"
+  ],
+  "note_to_self": "Next: land PR #43, then finish ALPHA.012 (coverage + suppressions doc). After that, ship quick wins 002/004/021/018 as a single \"Alpha polish\" PR to push >80%, and only then consider flipping AJV to hard-gating for policy paths.",
+  "summary": "Closed out Alpha test tasks, hardened lint workflows, and opened policy schema alignment PR; reclassified tasks and refreshed progress (Alpha 78%).",
+  "time": "01:20",
+  "topics": [
+    {
+      "context": "Matrix includes Alpine/Arch; wrappers and assertions needed polish",
+      "future_work": "Keep adding fixtures for attestation variants",
+      "issue": "Pattern/globbing and /bin/bash portability",
+      "resolution": "Use env bash wrapper; grep-based assertions; tasks reclassified",
+      "time_percent": 25,
+      "topic": "Alpha test close-out",
+      "what": "Moved 024/025/026 to complete; fixed publish test and trust gate wrapper",
+      "why": "Stabilize enforcement coverage across distros"
+    },
+    {
+      "context": "PR #42 initially failed on spacing/heading and changed-files splitting",
+      "future_work": "Sweep repo to remove legacy MD lint issues and return to cli2 full-repo",
+      "issue": "Space-delimited outputs broke loops; nested hooks missed",
+      "resolution": "Set separator to \n; filter changed files; include contrib/hooks/**; gate on error",
+      "time_percent": 25,
+      "topic": "Markdownlint & ShellCheck",
+      "what": "Pinned markdownlint-cli2; added v0 CLI for changed-only; newline separators; nested hooks; -S error",
+      "why": "Deterministic CI and less baseline noise"
+    },
+    {
+      "context": "Backlog had items already implemented or partially in-flight",
+      "future_work": "Quick wins: 002/004/021/018",
+      "issue": "Bars were under-reporting progress",
+      "resolution": "Updated docs/tasks, ran progress script; Alpha now 78%",
+      "time_percent": 20,
+      "topic": "Task reclassification",
+      "what": "Moved ALPHA.001/006/017 to complete; marked 012/020 active",
+      "why": "Reflect actual state; keep roadmap trustworthy"
+    },
+    {
+      "context": "Schema previously required fields writers didn’t always emit",
+      "future_work": "Evaluate making AJV hard-gating for policy-touching PRs and add more sample policies",
+      "issue": "AJV would fail minimal valid policies; env require_signed not allowed",
+      "resolution": "Schema relaxed + clarified; docs updated; CI triggers narrowed",
+      "time_percent": 30,
+      "topic": "Policy schema alignment (PR #43)",
+      "what": "Made deployment_requirements+ff_only optional; allowed per-env require_signed; writers emit version '1.0.0'; AJV gates on policy changes",
+      "why": "Eliminate drift between schema, writers, and docs"
+    }
+  ]
+}

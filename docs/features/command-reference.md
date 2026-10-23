@@ -4,11 +4,11 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
 
 ## Global Options
 
-- `--env <ENV>` — Target environment (default `prod`; can also set `SHIPLOG_ENV`).
+- `--env <ENV>` — Target environment (default `prod`; can also set `SHIPLOG_ENV`). Environment precedence: positional `ENV` on the subcommand > subcommand `--env` > global `--env` > `SHIPLOG_ENV` > `prod`. The selected environment drives both the journal ref and policy resolution (per-environment `require_signed` and author overrides).
 - `--boring` — Non-interactive mode (plain output; prompts disabled). Also `SHIPLOG_BORING=1`.
 - `--yes` — Auto-confirm prompts (sets `SHIPLOG_ASSUME_YES=1`).
 - `--no-push` / `--push` — Control auto-push behavior for commands that push refs.
-- `--dry-run` — Preview actions without updating Shiplog journals or notes (`SHIPLOG_DRY_RUN=1`).
+- `--dry-run[=VALUE]` — Preview actions without updating Shiplog journals or notes (`SHIPLOG_DRY_RUN=1`). `VALUE` accepts `1|true|yes|on|0|false|no|off` (any case); anything else is an error.
 - `--version` `-V` — Print version and exit.
 - `--help` `-h` — Show usage. Before the command name this prints the global usage; after it (`git shiplog write --help`) it prints that command's own options. Every command accepts `--help`/`-h` and exits 0.
 - Flags that take a value (`--service`, `--json`, `--env`, ...) fail with `<flag> requires a value` when the value is missing; unknown flags are errors, never silently dropped.
@@ -85,31 +85,36 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
   - Exit: non-zero when the journal ref does not exist (`journal refs/_shiplog/journal/<ENV> not found`), when any entry has a bad signature or unauthorized author, or when `OK=0`. Pass `--allow-empty` to accept an empty result as success.
 
 - `export-json [ENV] [--lenient]`
-  - Purpose: NDJSON export; one line per journal commit, newest first. A valid entry is its trailer + `commit` field.
+  - Purpose: NDJSON export; one line per journal commit, newest first. A valid entry is its trailer + `commit` field + `notes` (`{ref, attached}`: the resolved notes ref and whether a log note exists for the entry there).
   - Usage: `git shiplog export-json prod | jq '.'`
   - Malformed entries: a commit whose trailer is missing or not a JSON object is emitted as `{"commit":"<sha>","error":"invalid trailer","subject":"<first message line>"}` and the export continues.
   - Exit: 0 when every entry was valid; 3 when any entry was flagged, unless `--lenient` is passed (then 0). A missing journal is an error.
   - Requires: `jq`.
 
 - `publish [ENV] [--env ENV] [--no-notes] [--policy] [--trust] [--all]`
-  - Purpose: push Shiplog refs (journals/notes, and optionally policy/trust) to origin without writing a new entry.
-  - Usage: `git shiplog publish` (current env), `git shiplog publish staging`, `git shiplog publish --env prod`, `git shiplog publish --all --policy`
+  - Purpose: push Shiplog refs (journals/notes, and optionally policy/trust) to the configured remote without writing a new entry.
+  - Usage: `git shiplog publish` (current env), `git shiplog publish staging`, `git shiplog publish --env prod`, `git shiplog publish --all --policy --trust`
   - ENV: positional `ENV` > `--env` > `SHIPLOG_ENV` > `prod`. A second positional is an error. The output names the refs that were pushed.
-  - Notes: use this at the end of a deployment if you disable auto-push. Precedence for pushing: command flags > `git config shiplog.autoPush` > `SHIPLOG_AUTO_PUSH`.
+  - Order: trust, then policy, then journals, then notes, so a server running the pre-receive hook validates journals against the trust and policy it already has.
+  - Notes ref: the same resolved ref `write` used (`SHIPLOG_NOTES_REF` > policy `notes_ref` > `<ref root>/notes/logs`). If entries claim `log_attached=true` but that ref does not exist locally, `publish` fails instead of silently publishing journals without their logs.
+  - Fails loudly: a failed push of any requested ref (or `--policy`/`--trust` when the ref is missing locally) is an error, not a silent skip.
+  - Use this at the end of a deployment if you disable auto-push. Precedence for pushing: command flags > `git config shiplog.autoPush` > `SHIPLOG_AUTO_PUSH`.
 
-- `policy [show|validate|require-signed|toggle] [--json] [--boring]`
+- `policy [show|validate|require-signed|toggle] [--env ENV] [--json] [--boring]`
   - Purpose: inspect/change effective policy and signing requirement.
   - Usage:
-    - Show (plain): `git shiplog policy show`
+    - Show (plain): `git shiplog policy show` (for another environment: `git shiplog policy show --env staging`)
     - Show (JSON): `git shiplog policy show --json`
-    - Validate: `git shiplog policy validate`
+    - Validate the working-tree file (or the ref when no file exists): `git shiplog policy validate`
+    - Validate the published ref: `git shiplog policy validate --ref`; any file: `git shiplog policy validate --file path.json`
     - Require signed: `git shiplog policy require-signed true`
     - Toggle: `git shiplog policy toggle`
-  - JSON: includes `env_require_signed` map from `deployment_requirements`.
+  - Notes: `show` reports the source of every field (`sources` in JSON, `(from ...)` in plain text) and only warns when signing is on but the signers file is missing; `write`/`run`/`append`/`verify` refuse in that state. `require-signed`/`toggle` abort before moving the local policy ref when the resulting document fails validation. A policy document that fails validation stops every command (no fallback to defaults). See `docs/features/policy.md` for the precedence table.
+  - JSON: includes `env_require_signed` map from `deployment_requirements`, `sources`, `allowed_signers_file_exists` and `warnings`.
 
 - `trust sync [REF] [DEST]`
   - Purpose: sync allowed signers from a trust ref to a local file.
-  - Usage: `git shiplog trust sync refs/_shiplog/trust/root .shiplog/allowed_signers`
+  - Usage: `git shiplog trust sync refs/_shiplog/trust/root .shiplog/allowed_signers` (REF defaults to `<ref root>/trust/root`)
 
 - `trust show [REF] [--json]`
   - Purpose: display trust metadata (ID, threshold, maintainer roster, signer list and count).
@@ -118,14 +123,15 @@ A concise, code-sourced reference for Shiplog commands, flags, and examples. Glo
     - JSON: `git shiplog trust show --json`
 
 - `refs root show|set`
-  - Purpose: view or set the Shiplog ref root.
+  - Purpose: view or set the Shiplog ref root. Precedence: `SHIPLOG_REF_ROOT` env > `git config shiplog.refRoot` > `refs/_shiplog`. Every ref (journals, anchors, policy, trust, notes) derives from it.
   - Usage:
-    - Show: `git shiplog refs root show`
-    - Set: `git shiplog refs root set refs/heads/_shiplog`
+    - Show: `git shiplog refs root show` prints `Ref Root`, `Source` (`env (SHIPLOG_REF_ROOT)`, `config (git config shiplog.refRoot)` or `default`) and the derived refs; `--json` emits `{ref_root, source, journals_prefix, anchors_prefix, policy_ref, trust_ref, notes_ref}`.
+    - Set: `git shiplog refs root set refs/heads/_shiplog` (normalized: trailing slash stripped, must start with `refs/`; warns when `SHIPLOG_REF_ROOT` is set and would override it).
 
 - `refs migrate [--to <refs/...>] [--from <refs/...>] [--push] [--remove-old] [--dry-run]`
-  - Purpose: migrate/mirror refs between roots using the helper script.
-  - Usage: `git shiplog refs migrate --to refs/heads/_shiplog --dry-run`
+  - Purpose: migrate/mirror every ref under one root to another (journals, anchors, policy, trust, notes; nested names included) using `scripts/shiplog-migrate-ref-root.sh`, then record the new root in `git config shiplog.refRoot`.
+  - Usage: `git shiplog refs migrate --to refs/heads/_shiplog --dry-run` prints the plan and changes nothing; drop `--dry-run` to migrate, add `--push` to publish the new refs.
+  - `--from` defaults to the effective root; `SHIPLOG_REF_ROOT` in the environment still wins over the written config until you update or unset it.
 
 - `setup [--strictness open|balanced|strict] [--authors "a@x b@y"] [--strict-envs "prod staging"] [--auto-push|--no-auto-push] [--dry-run] [TRUST_OPTS...]`
   - Purpose: write `.shiplog/policy.json`, sync local policy ref, optionally bootstrap trust and push.

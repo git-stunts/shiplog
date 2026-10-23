@@ -1,0 +1,36 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "None"
+    }
+  ],
+  "date": "2025-10-21",
+  "key_decisions": [
+    "Adopt per-test sandbox for restore suite",
+    "Use fixed-string config filtering"
+  ],
+  "summary": "Hardened restore snapshot helpers and refactored tests to use sandbox repos without regex escapes.",
+  "time": "12:34",
+  "topics": [
+    {
+      "context": "Earlier escape logic overmatched",
+      "future_work": "Monitor CI for corner cases",
+      "issue": "Regex escaping brittle for remote names",
+      "resolution": "Switched to fixed-string filtering and cleaner nocasematch state",
+      "time_percent": 55,
+      "topic": "Restore helpers",
+      "what": "Reworked git config capture to avoid regex and clarified nocasematch handling",
+      "why": "Snapshot state failed on special chars"
+    },
+    {
+      "context": "Tests previously mutated caller repo",
+      "future_work": "None",
+      "issue": "Read-only filesystem broke temp remotes",
+      "resolution": "Now use setup sandbox, fixed-string greps, expanded coverage",
+      "topic": "Restore bats suite",
+      "what": "Converted tests to per-test sandboxes and added ordering assertions",
+      "why": "CI read-only failures and missing order checks"
+    }
+  ]
+}

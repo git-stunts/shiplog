@@ -1,0 +1,57 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Document SHIPLOG_REMOTE usage in README/feature docs"
+    }
+  ],
+  "date": "2025-10-09",
+  "key_decisions": [
+    "SHIPLOG_REMOTE env/git config drives all Shiplog pushes and fetches",
+    "Default git pushes now add --no-verify to avoid user pre-push conflicts"
+  ],
+  "summary": "Enabled configurable Shiplog remotes with --no-verify pushes across CLI/scripts and added regression coverage plus docs updates for SHIPLOG_REMOTE.",
+  "time": "22:10",
+  "topics": [
+    {
+      "context": "publish/write/setup commands issued git push origin",
+      "future_work": "Consider surfacing remote in command outputs/help text beyond current summary",
+      "issue": "Users couldn't redirect Shiplog refs or skip pre-push hooks",
+      "resolution": "Introduced SHIPLOG_REMOTE/env+git config, reused helper in fast-forward/publish/setup, and default to git push --no-verify",
+      "time_percent": 40,
+      "topic": "Remote override",
+      "what": "Added shiplog_remote_name helper and rewired CLI auto-push/publish/setup flows",
+      "why": "auto-push previously hardcoded origin and ignored workflows with dedicated refs"
+    },
+    {
+      "context": "Scripts automate trust/policy pushes",
+      "future_work": "Expose remote override flags directly on helper scripts",
+      "issue": "Automation reused git push origin and triggered hooks",
+      "resolution": "Centralized remote detection, switched to --no-verify, refreshed uninstall guidance",
+      "time_percent": 25,
+      "topic": "Scripts alignment",
+      "what": "Updated bootstrap-trust and migrate-ref-root scripts to respect SHIPLOG_REMOTE and --no-verify",
+      "why": "Tooling commands still assumed origin and standard hooks"
+    },
+    {
+      "context": "policy_validate.jq and pre-receive filter",
+      "future_work": "Share validator helper between CLI and hook to avoid drift",
+      "issue": "array uniqueness/allowlist checks misbehaved and hook swallowed errors",
+      "resolution": "Reused is_string_array/all() pattern and emitted validator stderr before exiting",
+      "time_percent": 15,
+      "topic": "Validation fixes",
+      "what": "Refined require_where jq helper and hook stderr surfacing",
+      "why": "Reviewer flagged parser gaps and hidden jq diagnostics"
+    },
+    {
+      "context": "New remote plumbing required guard rails",
+      "future_work": "Cover config wizard remote suggestions",
+      "issue": "Existing suite only used origin remote",
+      "resolution": "Extended test/19_publish_and_autopush_precedence to assert remote override plus new policy validations",
+      "time_percent": 20,
+      "topic": "Regression tests",
+      "what": "Added Bats coverage for remote auto-push/publish using pre-push sentinel and unsupported require_where",
+      "why": "Ensure --no-verify path and SHIPLOG_REMOTE override stay working"
+    }
+  ]
+}

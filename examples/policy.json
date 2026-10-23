@@ -3,15 +3,15 @@
   "schema": "https://raw.githubusercontent.com/flyingrobots/shiplog/main/examples/policy.schema.json",
   "format_compat": ">=1.0.0 <2.0.0",
   "require_signed": true,
-  "allow_ssh_signers_file": "~/.shiplog/allowed_signers",
+  "allow_ssh_signers_file": ".shiplog/allowed_signers",
   "authors": {
     "default_allowlist": [
-      "${DEPLOY_BOT_EMAIL:?DEPLOY_BOT_EMAIL must be set}",
-      "${ENGINEERING_EMAIL:?ENGINEERING_EMAIL must be set}"
+      "deploy-bot@example.com",
+      "engineering@example.com"
     ],
     "env_overrides": {
       "prod": [
-        "${PROD_APPROVER_EMAIL:-prod-approver@example.com}"
+        "prod-approver@example.com"
       ]
     }
   },
@@ -26,7 +26,5 @@
     }
   },
   "ff_only": true,
-  "notes_ref": "refs/_shiplog/notes/logs",
-  "journals_ref_prefix": "refs/_shiplog/journal/",
-  "anchors_ref_prefix": "refs/_shiplog/anchors/"
+  "notes_ref": "refs/_shiplog/notes/logs"
 }

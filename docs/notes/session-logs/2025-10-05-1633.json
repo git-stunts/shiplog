@@ -1,0 +1,69 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Open full README rewrite PR (draft)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Add GitHub wizard emitters (ruleset + workflow) behind flags"
+    },
+    {
+      "owner": "assistant",
+      "task": "Unskip publish test after harness fix"
+    },
+    {
+      "owner": "assistant",
+      "task": "Create signed attestation fixtures and unskip E2E"
+    }
+  ],
+  "date": "2025-10-05",
+  "key_decisions": [
+    "Open separate PRs for tests, docs, and README",
+    "Keep attestation and publish precedence tests skipped until fixtures/harness are ready"
+  ],
+  "summary": "Opened Alpha P2 PRs (tests, docs) and a README FAQ; added owner-approval guardrails PR earlier and fixed repo context.",
+  "time": "16:33",
+  "topics": [
+    {
+      "context": "require-owner-approval.yml needed --repo",
+      "future_work": "Optionally auto-label on Approve via action",
+      "issue": "gh pr view lacked repo context",
+      "resolution": "Added --repo $GITHUB_REPOSITORY",
+      "time_percent": 20,
+      "topic": "Owner guardrails",
+      "what": "CODEOWNERS+label workflow; repo context fix",
+      "why": "Enforce 'never merge without owner'"
+    },
+    {
+      "context": "Earlier regressions around hook gate and publish flow",
+      "future_work": "Stabilize publish push; add real attestation fixtures",
+      "issue": "Push harness flakiness and signed fixtures pending",
+      "resolution": "Added 18*, 19* (skip), 22* (skip); green matrix",
+      "time_percent": 40,
+      "topic": "Tests (Alpha P2)",
+      "what": "Trust gate E2E, publish precedence (skip), attestation placeholder",
+      "why": "Strengthen enforcement coverage across matrix"
+    },
+    {
+      "context": "New policy validate subcommand and earlier AJV question",
+      "future_work": "Full README rewrite PR next",
+      "issue": "Missing CLI validate docs and AJV explanation",
+      "resolution": "Docs updated + FAQ",
+      "time_percent": 20,
+      "topic": "Docs",
+      "what": "Document policy validate; add README FAQ",
+      "why": "Clarify AJV, SaaS enforcement, trust modes"
+    },
+    {
+      "context": "task-progress job enforces generator format",
+      "future_work": "Mark complete as PRs land",
+      "issue": "None",
+      "resolution": "make progress; PRs carry the diffs",
+      "time_percent": 20,
+      "topic": "Tasks & bars",
+      "what": "Added Alpha P2 active tasks and refreshed bars",
+      "why": "Keep progress authoritative and CI happy"
+    }
+  ]
+}

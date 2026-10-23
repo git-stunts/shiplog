@@ -2,7 +2,10 @@
 # Plugin support for Shiplog (experimental)
 
 shiplog_plugins_dir() {
-  local root="${SHIPLOG_PLUGINS_DIR:-$PWD/.shiplog/plugins}"
+  # Plugins live under the repository root, not the caller's cwd (SLT.BUG.LIB.007).
+  local repo_root
+  repo_root=$(shiplog_repo_root 2>/dev/null || printf '%s' "$PWD")
+  local root="${SHIPLOG_PLUGINS_DIR:-$repo_root/.shiplog/plugins}"
   printf '%s' "$root"
 }
 

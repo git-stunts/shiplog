@@ -1,7 +1,14 @@
 #!/usr/bin/env sh
 set -eu
 
-TRUST_REF="${1:-refs/_shiplog/trust/root}"
+# Default trust ref follows the configured ref root (SHIPLOG_TRUST_REF >
+# SHIPLOG_REF_ROOT > git config shiplog.refRoot > refs/_shiplog).
+if [ -z "${SHIPLOG_TRUST_REF:-}" ]; then
+  SHIPLOG_REF_ROOT_EFFECTIVE="${SHIPLOG_REF_ROOT:-$(git config --get shiplog.refRoot 2>/dev/null || true)}"
+  SHIPLOG_REF_ROOT_EFFECTIVE="${SHIPLOG_REF_ROOT_EFFECTIVE:-refs/_shiplog}"
+  SHIPLOG_TRUST_REF="${SHIPLOG_REF_ROOT_EFFECTIVE%/}/trust/root"
+fi
+TRUST_REF="${1:-$SHIPLOG_TRUST_REF}"
 DEST="${2:-.shiplog/allowed_signers}"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -24,9 +31,15 @@ fi
 DEST_DIR="$(dirname "$DEST")"
 mkdir -p "$DEST_DIR"
 
-git cat-file -p "$BLOB" > "$DEST"
-chmod 600 "$DEST"
+# Git resolves gpg.ssh.allowedSignersFile relative to the process working
+# directory (only ~ is expanded), so store an absolute path: verification from
+# a subdirectory or a CI step that cd's must still find the roster.
+DEST_DIR_ABS="$(cd "$DEST_DIR" && pwd -P)"
+DEST_ABS="$DEST_DIR_ABS/$(basename "$DEST")"
 
-git config gpg.ssh.allowedSignersFile "$DEST"
+git cat-file -p "$BLOB" > "$DEST_ABS"
+chmod 600 "$DEST_ABS"
 
-printf '✅ installed allowed_signers from %s → %s\n' "$TRUST_REF" "$DEST"
+git config gpg.ssh.allowedSignersFile "$DEST_ABS"
+
+printf '✅ installed allowed_signers from %s → %s\n' "$TRUST_REF" "$DEST_ABS"

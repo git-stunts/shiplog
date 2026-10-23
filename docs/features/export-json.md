@@ -11,6 +11,7 @@ git shiplog export-json [ENV] [--lenient] | jq '.'
 ## Behavior
 - Requires `jq` to be available.
 - Streams commits in reverse chronological order and appends a `commit` field to each JSON payload.
+- Each valid line also carries `notes` (`{ref, attached}`): the resolved notes ref (`SHIPLOG_NOTES_REF` > policy `notes_ref` > `<ref root>/notes/logs`) and whether a log note exists for the entry there.
 - Emits exactly one line per journal commit. When a commit has no trailer, or its trailer is not a single JSON object, the line is an error record and the export continues:
 
   ```json

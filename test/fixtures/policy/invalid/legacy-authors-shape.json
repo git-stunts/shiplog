@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "authors": {
+    "default": [
+      "a@example.com"
+    ],
+    "prod": [
+      "b@example.com"
+    ]
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Mark SLT.ALPHA.023 complete and run scripts/update-task-progress.sh"
+    },
+    {
+      "owner": "assistant",
+      "task": "Implement git shiplog policy validate + Bats tests (P1)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Align policy schema and CI validation (ajv in CI; jq --schema optional) (P1)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Docs sweep for ls/show semantics and test references (P1)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Add CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md (P1)"
+    },
+    {
+      "owner": "assistant",
+      "task": "Open PR alpha/p1-sweep-policy-validate-and-docs and keep bars current"
+    }
+  ],
+  "date": "2025-10-05",
+  "key_decisions": [
+    "Keep linters blocking; fix baseline rather than disabling rules",
+    "Config wizard supports both modes and remains local-only until publish",
+    "Use SVG export for TRUST diagram; .mmd remains canonical source",
+    "Correct manual progress bars and prefer script for future updates"
+  ],
+  "summary": "Merged v0.3.0 release PR with config wizard, fixed CI/lint, updated docs; prepared Alpha P1 sweep plan.",
+  "time": "15:46",
+  "topics": [
+    {
+      "context": "Blocking linters and failing wizard tests on PR",
+      "future_work": "Monitor matrix; keep linters strict",
+      "issue": "Workflow line-length/brackets and config wizard dry-run/apply logic",
+      "resolution": "Wrapped lines, normalized expressions, corrected wizard parsing and mutual exclusion",
+      "time_percent": 25,
+      "topic": "Release PR & CI",
+      "what": "Consolidated PR merged; fixed yamllint/shellcheck/markdownlint; all tests green locally",
+      "why": "Stabilize main and unblock Alpha"
+    },
+    {
+      "context": "Docs referenced wizard; tests added and failing initially",
+      "future_work": "Emit CI/rulesets from wizard (--emit-ci/--emit-ruleset)",
+      "issue": "Invalid JSON, ref_root normalization, mutually exclusive flags",
+      "resolution": "Built plan via jq, coerced values, enforced explicit exclusivity",
+      "time_percent": 25,
+      "topic": "Config Wizard",
+      "what": "Implemented git shiplog config with dry-run JSON, --apply, answers-file; added tests",
+      "why": "Host-aware onboarding and fewer misconfigs"
+    },
+    {
+      "context": "Mermaid not guaranteed on renderers; users confused about prompts",
+      "future_work": "Add screenshots/diagram polish",
+      "issue": "Inline mermaid; missing CI usage guidance",
+      "resolution": "Added img/trust-modes.svg and tips; cross-links",
+      "time_percent": 15,
+      "topic": "Docs & UX",
+      "what": "README/getting-started non-interactive tips; TRUST diagram switched to SVG; hosting matrix links",
+      "why": "Clarity for CI users and portability for docs"
+    },
+    {
+      "context": "Manual edits drifted from generator output",
+      "future_work": "Optionally auto-generate with script for decimals",
+      "issue": "Incorrect percents and bar fill",
+      "resolution": "Recomputed and updated; kept fraction consistent",
+      "time_percent": 10,
+      "topic": "Progress Bars",
+      "what": "Corrected Alpha 74% (54/73) and Beta 9.5% (2/21)",
+      "why": "Keep canonical bars accurate"
+    },
+    {
+      "context": "Remaining Alpha tasks across policy, schema, docs",
+      "future_work": "Execute next session",
+      "issue": "Scattered ownership and drift",
+      "resolution": "Define single PR with tasks below",
+      "time_percent": 25,
+      "topic": "Alpha P1 Sweep Plan",
+      "what": "Bundle P0–P1 items in one PR",
+      "why": "Close out Alpha quickly with focused work"
+    }
+  ]
+}

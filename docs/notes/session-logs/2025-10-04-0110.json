@@ -1,0 +1,42 @@
+{
+  "action_items": [
+    {
+      "owner": "assistant",
+      "task": "Add Bats tests for config wizard (dry-run + apply); cover SaaS vs self-hosted defaults"
+    },
+    {
+      "owner": "assistant",
+      "task": "Emit workflow/ruleset files when requested (e.g., --emit-ci) and link in plan"
+    }
+  ],
+  "date": "2025-10-04",
+  "key_decisions": [
+    "Name the questionnaire `git shiplog config` with --interactive/--wizard",
+    "Default branch namespace on SaaS; custom refs on self-hosted",
+    "Apply mode writes policy/config locally but does not push"
+  ],
+  "summary": "Added `git shiplog config` wizard (interactive/dry-run/apply) and docs; updated references to prefer config over setup for host-aware guidance.",
+  "time": "01:10",
+  "topics": [
+    {
+      "context": "User requested questionnaire but under `config` instead of `setup`",
+      "future_work": "Expand questions, emit CI/ruleset files, add Bats tests",
+      "issue": "No interactive questionnaire existed",
+      "resolution": "Implemented CLI, plan JSON output, local apply for policy/refRoot/autoPush",
+      "time_percent": 70,
+      "topic": "Config wizard",
+      "what": "New `git shiplog config --interactive` with apply/dry-run and answers-file",
+      "why": "Provide guided, host-aware onboarding and reduce misconfiguration"
+    },
+    {
+      "context": "Existing docs referenced future questionnaire under setup",
+      "future_work": "Tutorial path + GIF of flow",
+      "issue": "Docs drift and naming",
+      "resolution": "Updated references and backlog task to new command name",
+      "time_percent": 30,
+      "topic": "Docs updates",
+      "what": "Added features/config.md; linked from README, docs index, command reference",
+      "why": "Make the wizard discoverable and accurately described"
+    }
+  ]
+}
