@@ -332,6 +332,39 @@ trust_verify_commit_roster_signature() {
   fi
 }
 
+# trust_verify_commit_signer_not_revoked <commit> <signers_file> <trust_json>
+# Defense in depth for journal entries: fails when every roster binding of the
+# commit's signing key belongs to a maintainer marked revoked in <trust_json>
+# (for example, revoked but its allowed_signers line was not removed). Keys that
+# are not bound to any named principal are left to the roster signature check.
+trust_verify_commit_signer_not_revoked() {
+  local commit="$1" signers="${2:-}" trust_json="$3" bindings kind key principal revoked=0 other=0
+  bindings=$(trust_verify_commit_bindings "$commit" "$signers") || return 0
+  while IFS=$'\t' read -r kind key principal; do
+    [ -n "$kind" ] || continue
+    if [ "$kind" = gpg ]; then
+      if printf '%s' "$trust_json" | tv_jq -e --arg f "$(printf '%s' "$key" | tr -d ' ' | tr '[:lower:]' '[:upper:]')" '
+          [ .maintainers[] | select(type == "object") | select(.revoked == true)
+            | select((.pgp_fpr // "" | gsub(" "; "") | ascii_upcase) == $f) ] | length > 0' >/dev/null 2>&1; then
+        revoked=1
+      else
+        other=1
+      fi
+    elif printf '%s' "$trust_json" | tv_jq -e --arg p "$principal" '
+        [ .maintainers[] | select(type == "object") | select(.revoked == true)
+          | select((.email == $p) or (.principal == $p)) ] | length > 0' >/dev/null 2>&1; then
+      revoked=1
+    else
+      other=1
+    fi
+  done <<<"$bindings"
+  if [ "$revoked" -eq 1 ] && [ "$other" -eq 0 ]; then
+    tv_fail "commit $commit is signed by a revoked maintainer's key; remove its allowed_signers line"
+    return 1
+  fi
+  return 0
+}
+
 # trust_verify_commit_by_maintainer <commit> <signers_file> <trust_json> [what]
 # The commit must carry a valid signature whose key maps to an unrevoked
 # maintainer of <trust_json>: SSH keys via the roster principal, OpenPGP keys

@@ -304,6 +304,35 @@ bootstrap_server_k() {
   [ -z "$(adv_server_signers_config "$REMOTE_DIR")" ]
 }
 
+@test "revoked-journal-signer: an entry signed by a revoked maintainer's key is rejected even if its roster line remains" {
+  adv_install_hook "$REMOTE_DIR" "${HOOK_ENV_ATTEST[@]}"
+  # Roster: the tester (K) and A, with A revoked in trust.json but still listed in allowed_signers.
+  trust=$(adv_trust_json 1 attestation "$TESTER_EMAIL" a@example.com:revoked)
+  signers="$(adv_signers "$TESTER_EMAIL=K" a@example.com=A)"
+  GENESIS_K=$(adv_trust_commit -S K --sig "$TESTER_EMAIL=K" -e "$TESTER_EMAIL" \
+    -m "shiplog: trust root (A revoked)" "$trust" "$signers")
+  git update-ref "$ADV_TRUST_REF" "$GENESIS_K"
+  git shiplog trust sync >/dev/null
+  adv_push_ok "$ADV_TRUST_REF"
+  build_policy_k true
+  adv_push_ok "$ADV_POLICY_REF"
+  git shiplog init >/dev/null
+
+  # Control: an entry signed by the unrevoked tester key is accepted.
+  adv_use_signing_key K
+  export SHIPLOG_SIGN=1
+  make_entry
+  adv_push_ok refs/_shiplog/journal/prod
+  first=$(adv_remote_ref "$REMOTE_DIR" refs/_shiplog/journal/prod)
+
+  adv_use_signing_key A
+  make_entry
+  entry=$(git rev-parse refs/_shiplog/journal/prod)
+  adv_assert_commit_signed "$entry"
+  adv_push_rejected refs/_shiplog/journal/prod
+  [ "$(adv_remote_ref "$REMOTE_DIR" refs/_shiplog/journal/prod)" = "$first" ]
+}
+
 @test "roster-swap: a signed entry is rejected after the roster drops the signing key" {
   bootstrap_server_k true
   adv_use_signing_key K

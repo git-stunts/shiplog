@@ -530,6 +530,7 @@ ensure_commit_signed_if_required() {
   fi
   if [ -n "$SIGNERS_FILE" ]; then
     trust_verify_commit_roster_signature "$commit" "$SIGNERS_FILE" || error "signature for $commit not accepted by the trust roster"
+    trust_verify_commit_signer_not_revoked "$commit" "$SIGNERS_FILE" "$CURRENT_TRUST_JSON" || error "signature for $commit comes from a revoked maintainer"
   else
     trust_verify_commit_roster_signature "$commit" "" || error "signature verification failed for $commit"
   fi
