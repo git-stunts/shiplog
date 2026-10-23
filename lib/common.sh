@@ -204,7 +204,9 @@ shiplog_prompt_input() {
     if shiplog_have_bosun; then
       local bosun
       bosun=$(shiplog_bosun_bin)
-      if result=$("$bosun" input --placeholder "$placeholder" --value "$value" 2>/dev/null); then
+      # bosun renders its prompt on stderr and prints only the answer on
+      # stdout, so stderr must stay attached to the terminal here.
+      if result=$("$bosun" input --placeholder "$placeholder" --value "$value"); then
         printf '%s\n' "$result"
         _log_prompt_interaction prompt "$placeholder" "$result"
         return
@@ -239,10 +241,11 @@ shiplog_prompt_choice() {
     if shiplog_have_bosun; then
       local bosun
       bosun=$(shiplog_bosun_bin)
+      # The menu is drawn on stderr; stdout carries only the selection.
       if [ -n "$value" ]; then
-        result=$("$bosun" choose --header "$header" --default "$value" "${options[@]}" 2>/dev/null) || true
+        result=$("$bosun" choose --header "$header" --default "$value" "${options[@]}") || true
       else
-        result=$("$bosun" choose --header "$header" "${options[@]}" 2>/dev/null) || true
+        result=$("$bosun" choose --header "$header" "${options[@]}") || true
       fi
     fi
     if [ -z "$result" ]; then
@@ -263,11 +266,22 @@ shiplog_confirm() {
     return 0
   fi
   _log_prompt_interaction confirmation "$prompt" null raw
-  if shiplog_have_bosun && "$(shiplog_bosun_bin)" confirm "$prompt"; then
-    _log_prompt_interaction confirmation "$prompt" true raw
-    return 0
+  if shiplog_have_bosun; then
+    # bosun confirm is tri-state: 0 = yes, 1 = no, 2 = could not prompt (no
+    # terminal). Its stdout ("yes"/"no") is discarded so it never leaks into
+    # the CLI's stdout; the prompt itself is drawn on stderr. Only "could not
+    # prompt" (or a bosun that failed to start) falls back to the plain prompt;
+    # an explicit "no" aborts.
+    local bosun rc=0
+    bosun=$(shiplog_bosun_bin)
+    "$bosun" confirm "$prompt" >/dev/null || rc=$?
+    case "$rc" in
+      0) _log_prompt_interaction confirmation "$prompt" true raw; return 0 ;;
+      1) _log_prompt_interaction confirmation "$prompt" false raw; return 1 ;;
+      *) ;;
+    esac
   fi
-  # Fallback
+  # Fallback: plain prompt on stderr, answer read from stdin
   printf '%s [y/N] ' "$prompt" >&2
   local ans
   IFS= read -r ans || ans=""
