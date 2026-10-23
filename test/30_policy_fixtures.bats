@@ -97,7 +97,8 @@ teardown() {
 }
 
 @test "fixtures: the example fixture is byte-identical to examples/policy.json" {
-  cmp "$SHIPLOG_PROJECT_ROOT/examples/policy.json" "$FIXTURES/valid/example-full.json"
+  # git hash-object, not cmp: the arch and fedora matrix images have no cmp.
+  [ "$(git hash-object "$SHIPLOG_PROJECT_ROOT/examples/policy.json")" = "$(git hash-object "$FIXTURES/valid/example-full.json")" ]
 }
 
 @test "SLT.BUG.LIB.008: examples/policy.json is usable as-is (literal addresses, no shell syntax)" {
