@@ -211,3 +211,26 @@ drop_signers() {
   run git show-ref refs/_shiplog/journal/prod
   [ "$status" -ne 0 ]
 }
+
+@test "SLT.BUG.LIB.010: a newline or whitespace inside a policy string cannot shift or split fields" {
+  # Positive control: the allowlist is read when the strings are clean.
+  printf '{"version":"1.0.0","allow_ssh_signers_file":"x","authors":{"default_allowlist":["a@example.com"]}}\n' > .shiplog/policy.json
+  run git shiplog policy show --boring
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Allowed Authors: a@example.com"* ]]
+  # A newline in the signers path would otherwise push the allowlist off its line.
+  printf '{"version":"1.0.0","allow_ssh_signers_file":"x\\nrefs/_shiplog/notes/evil","authors":{"default_allowlist":["a@example.com"]}}\n' > .shiplog/policy.json
+  run git shiplog policy show --boring
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"allow_ssh_signers_file"* ]]
+  [[ "$output" != *"Allowed Authors: <none>"* ]]
+  # An author entry with whitespace would otherwise become two authors.
+  printf '{"version":"1.0.0","authors":{"default_allowlist":["a@example.com b@example.com"]}}\n' > .shiplog/policy.json
+  run git shiplog policy show --boring
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"authors.default_allowlist"* ]]
+  printf '{"version":"1.0.0","authors":{"default_allowlist":["a@example.com"],"env_overrides":{"prod":["b@example.com\\tc@example.com"]}}}\n' > .shiplog/policy.json
+  run git shiplog --boring policy validate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"authors.env_overrides.prod"* ]]
+}

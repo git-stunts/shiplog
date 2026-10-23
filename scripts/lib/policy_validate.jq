@@ -31,7 +31,10 @@ def allowed_require_where: ["region", "cluster", "namespace", "service", "enviro
 def fieldpath($path; $key): if $path == "" then $key else "\($path).\($key)" end;
 
 def is_string_array: type == "array" and all(.[]; type == "string");
-def is_nonempty_string_array: type == "array" and all(.[]; type == "string" and length > 0);
+# Values the CLI reads one per line or splits on whitespace: no control
+# characters in paths, no whitespace inside an author entry.
+def no_control_chars: explode | all(.[]; . >= 32 and . != 127);
+def is_author_array: type == "array" and all(.[]; type == "string" and length > 0 and (test("\\s") | not));
 def require_where_ok:
   is_string_array
   and ((unique | length) == length)
@@ -54,18 +57,18 @@ def authors_errors:
     else
       (.authors | unknown_keys("authors"; authors_keys)),
       (if (.authors | has("default_allowlist")) then
-         (if (.authors.default_allowlist | is_nonempty_string_array and length > 0) then empty
-          else "authors.default_allowlist: non-empty array of non-empty strings required" end)
+         (if (.authors.default_allowlist | is_author_array and length > 0) then empty
+          else "authors.default_allowlist: non-empty array of non-empty strings without whitespace required" end)
        else
-         "authors.default_allowlist: non-empty array of non-empty strings required when authors is present"
+         "authors.default_allowlist: non-empty array of non-empty strings without whitespace required when authors is present"
        end),
       (if (.authors | has("env_overrides")) then
          if (.authors.env_overrides | type) != "object" then
            "authors.env_overrides: object required"
          else
            (.authors.env_overrides | to_entries[]
-             | select((.value | is_nonempty_string_array) | not)
-             | "authors.env_overrides.\(.key): array of non-empty strings required")
+             | select((.value | is_author_array) | not)
+             | "authors.env_overrides.\(.key): array of non-empty strings without whitespace required")
          end
        else empty end)
     end
@@ -105,7 +108,8 @@ else
   typed(""; "format_compat"; type == "string"; "string required"),
   typed(""; "require_signed"; type == "boolean"; "boolean required"),
   typed(""; "ff_only"; type == "boolean"; "boolean required"),
-  typed(""; "allow_ssh_signers_file"; type == "string" and length > 0; "non-empty string required"),
+  typed(""; "allow_ssh_signers_file"; type == "string" and length > 0 and no_control_chars;
+        "non-empty string without control characters required"),
   typed(""; "notes_ref"; type == "string" and test(ref_pattern); "Git ref under refs/ required"),
   typed(""; "journals_ref_prefix"; type == "string" and test(ref_prefix_pattern);
         "ref prefix under refs/ ending in / required (reserved; not yet honored)"),

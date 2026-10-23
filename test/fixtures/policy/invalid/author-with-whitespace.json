@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "authors": {
+    "default_allowlist": ["a@example.com b@example.com"]
+  }
+}
