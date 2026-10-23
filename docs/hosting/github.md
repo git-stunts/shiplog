@@ -46,6 +46,7 @@ Some plans allow rulesets targeting arbitrary ref names. Use a “push” rulese
   - Optional: `required_signatures` (GitHub verification; see caveat below)
 
 Validate:
+
 - Try deleting a journal ref: `git push origin :refs/_shiplog/journal/prod` → should be rejected with a ruleset message.
 
 ### Option B — Use Branch Namespace to Leverage Branch Rules
@@ -61,6 +62,7 @@ If your plan cannot protect arbitrary refs, move Shiplog refs under branches so 
 - Then create a Branch ruleset targeting `_shiplog/**` with the same rules: block deletion, non-FF, require linear history.
 
 Migration sketch:
+
 1) Mirror current tips to the new namespace and push them (the helper handles every ref kind, nested names included, and records the new root in `git config shiplog.refRoot`):
    - `git shiplog refs migrate --to refs/heads/_shiplog --dry-run` (preview)
    - `git shiplog refs migrate --to refs/heads/_shiplog --push`
