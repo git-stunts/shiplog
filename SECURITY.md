@@ -1,6 +1,6 @@
 # Security Policy
 
-- Please report security issues privately to `security@shiplog.local`.
+- Please report security issues privately to <james@flyingrobots.dev>.
 - Do not open public issues for vulnerabilities.
 - We aim to triage within 72 hours and provide a fix or guidance swiftly.
 
