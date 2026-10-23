@@ -142,7 +142,9 @@ chk_label_all_closed() { # label
 chk_issue_body() { # issue pattern
   [ "$GH_OK" -eq 1 ] || { echo "gh unavailable"; return 2; }
   local body="$TRACKING_BODY"
-  [ "$1" = "$ISSUE" ] || body=$(gh issue view "$1" --json body -q .body 2>/dev/null)
+  if [ "$1" != "$ISSUE" ]; then
+    body=$(gh issue view "$1" --json body -q .body 2>/dev/null) || { echo "gh error"; return 2; }
+  fi
   printf '%s' "$body" | grep -Eq -- "$2" && echo "found" || { echo "not found: $2"; return 1; }
 }
 chk_ci_main_green() { # workflow (informational; only ci.yml is read)
@@ -292,6 +294,9 @@ self_test() {
   # A reopened issue's row is unticked; closed rows are ticked.
   st_run --update
   { st_line '- [ ] #11 eleven' && st_line '- [x] #12'; } || { echo "self-test: reopened issue row stays ticked"; rc=1; }
+  # A failed body lookup for another issue is a skip (tooling), not a fail.
+  ( export PATH="$ST_DIR/bin:$PATH" FAKE_GH_DIR="$ST_DIR"; GH_OK=1; chk_issue_body 999 x >/dev/null ); st_rc=$?
+  [ "$st_rc" -eq 2 ] || { echo "self-test: issue-body lookup failure reported as exit $st_rc, want 2"; rc=1; }
   # A failed CI lookup is a tooling error, not a red main: no edit, exit 2.
   : > "$ST_DIR/run_fail"
   st_run --update; st_rc=$?
