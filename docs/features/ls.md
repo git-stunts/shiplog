@@ -33,7 +33,7 @@ git shiplog --env staging ls
 - **Entry Processing**: When `jq` is available, `ls` reads values from the JSON trailer for robustness. Otherwise it falls back to subject/body parsing.
 - **Columns**: Status, Service, Env, Author, Date.
 - **Missing values**: Rendered as `-` (columns are kept stable; no noisy `?`).
-- **LIMIT**: Caps the number of entries returned (default `20`).
+- **LIMIT**: Caps the number of entries returned (default `20`). Must be a positive integer; anything else, a third argument or an unknown flag is an error. `--` ends option parsing (`git shiplog ls -- staging`).
 - **Output**: In interactive mode with Bosun, renders a table. Otherwise prints TSV with header.
 
 ## Related Code
