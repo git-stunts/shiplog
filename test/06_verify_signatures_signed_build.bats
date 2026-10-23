@@ -93,7 +93,12 @@ write_signed_entry() {
   [ "$status" -eq 0 ]
   local sha
   sha=$(git rev-parse "$JOURNAL_REF")
-  ! git cat-file commit "$sha" | grep -q '^gpgsig '
+  # Not `! cmd | grep`: Bats does not fail a test on a negated command that
+  # is not the last line, so that form asserts nothing.
+  if git cat-file commit "$sha" | grep -q '^gpgsig '; then
+    echo "entry $sha is signed; expected an unsigned entry"
+    false
+  fi
 
   run git shiplog --boring verify
   [ "$status" -ne 0 ]
