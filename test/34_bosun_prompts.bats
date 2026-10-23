@@ -105,6 +105,20 @@ EOF
   [ "$(cat "$WORK/out.txt")" = "yes" ]
 }
 
+@test "confirm: under a pty with stderr redirected away, it does not prompt invisibly (exits 2)" {
+  # Prompts render on stderr. With stdout on the terminal but stderr sent to
+  # /dev/null there is nowhere to show the question, so confirm must report
+  # "cannot prompt" instead of silently consuming the next keypress.
+  cat > "$WORK/inner.sh" <<EOF
+#!/usr/bin/env bash
+"$BOSUN" confirm --no-color "HIDDEN_MARK?" 2>/dev/null
+printf '%s' "\$?" > "$WORK/rc.txt"
+EOF
+  run_in_pty "$WORK/inner.sh" "y"
+  [ "$(cat "$WORK/rc.txt")" = "2" ]
+  ! grep -q "yes" "$WORK/typescript"
+}
+
 # ---- #157: tri-state confirm -------------------------------------------------
 
 @test "confirm: non-TTY without --default-yes exits 2 and prints nothing on stdout" {

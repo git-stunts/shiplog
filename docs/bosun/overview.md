@@ -6,7 +6,7 @@ Bosun provides lightweight TUI primitives implemented in pure Bash, designed to 
 
 ## Interactive detection
 
-Bosun prompts only when it has a terminal to prompt on. It treats a session as interactive when **stdin is a terminal and at least one of stdout or stderr is a terminal**. Shiplog calls Bosun as `answer=$(bosun input …)`, which turns stdout into a pipe; stderr is still attached to the terminal, so detection succeeds and the prompt appears.
+Bosun prompts only when it has a terminal to prompt on. It treats a session as interactive when **stdin and stderr are both terminals** (stdout may be redirected or captured). Shiplog calls Bosun as `answer=$(bosun input …)`, which turns stdout into a pipe; stderr is still attached to the terminal, so detection succeeds and the prompt appears. When stderr is redirected away from the terminal there is nowhere to show a prompt, so Bosun behaves as non-interactive even if stdout is a terminal.
 
 - Prompts, menus and spinner frames are rendered on **stderr**. Stdout carries only the answer, so `$(…)` captures exactly the value. A script that merges the streams (`2>&1`) will see prompt text mixed into the output; keep stderr separate when capturing.
 - Without a terminal: `input` reads stdin when stdin is a pipe or a non-empty regular file and otherwise returns its default; `choose` returns its default (or the first option); `confirm` exits 2 ("cannot prompt") unless `--yes` or `--default-yes` is given; `spin` runs the command with no animation.

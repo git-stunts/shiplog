@@ -25,7 +25,7 @@ The prompt itself is written to stderr, so `$(bosun confirm …)` captures only 
 
 ## Non-interactive rule
 
-Bosun prompts only when stdin is a terminal and stdout or stderr is a terminal (see `bosun help overview`). In a pipeline or CI job there is nothing to ask, so `confirm` exits 2 rather than silently answering no. Callers can tell "declined" (1) from "unavailable" (2) and decide whether to fall back to their own prompt; Shiplog's `shiplog_confirm` falls back only on 2 and treats 1 as an abort. Pass `--yes` or `--default-yes` when a script must proceed without a terminal.
+Bosun prompts only when stdin and stderr are both terminals, because the prompt is drawn on stderr (see `bosun help overview`). In a pipeline or CI job there is nothing to ask, so `confirm` exits 2 rather than silently answering no. Callers can tell "declined" (1) from "unavailable" (2) and decide whether to fall back to their own prompt; Shiplog's `shiplog_confirm` falls back only on 2 and treats 1 as an abort. Pass `--yes` or `--default-yes` when a script must proceed without a terminal.
 
 Examples:
 

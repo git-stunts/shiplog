@@ -81,15 +81,16 @@ show_doc() {
 }
 
 # ---- TTY & Color ------------------------------------------------------------
-# Interactive when stdin is a terminal and at least one of stdout/stderr is.
-# Callers capture stdout with $(...), which turns fd 1 into a pipe; stderr is
-# still the terminal, so prompts render there and the answer alone goes to
-# stdout. BOSUN_FORCE_TTY=1 overrides the probe (tests, odd terminals).
+# Interactive when stdin and stderr are terminals. Prompts render on stderr,
+# so stderr must be the terminal; stdout may be anything. Callers capture
+# stdout with $(...), which turns fd 1 into a pipe while stderr stays on the
+# terminal, so the answer alone goes to stdout. BOSUN_FORCE_TTY=1 overrides
+# the probe (tests, odd terminals).
 is_tty() {
   if [ "${BOSUN_FORCE_TTY:-0}" = "1" ]; then
     return 0
   fi
-  [ -t 0 ] && { [ -t 1 ] || [ -t 2 ]; }
+  [ -t 0 ] && [ -t 2 ]
 }
 # Prompt text goes to stderr so that captured stdout contains only the answer.
 prompt_out() {

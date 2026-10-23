@@ -54,7 +54,7 @@ The `test/` directory contains the Bats-based integration suite that exercises t
   - In non‑TTY, Bosun does not prompt; tests run with safe fallbacks. `bosun confirm` exits 2 ("cannot prompt") without a terminal, so `shiplog_confirm` falls back to its plain `[y/N]` prompt and reads stdin; use `--yes` to skip confirmation entirely.
 
 - Bosun prompt tests (`test/34_bosun_prompts.bats`)
-  - Bosun treats a session as interactive when stdin is a terminal and stdout *or* stderr is a terminal; prompts are drawn on stderr so `$(bosun …)` captures only the answer.
+  - Bosun treats a session as interactive when stdin and stderr are both terminals (stdout may be captured); prompts are drawn on stderr so `$(bosun …)` captures only the answer.
   - The pty cases run bosun under util-linux `script -q -c … /dev/null` so stdin is a real terminal while stdout is captured. They `skip` when `script` is absent (the default `ubuntu:24.04` image ships it in `bsdutils`; some matrix images may not).
   - Manual check, in a real terminal with bosun on `PATH` and no `--yes`: run `git shiplog write` in a sandbox repo. Expected: each field prompts (`service (e.g., web)` etc.) on the terminal, typed values appear in the Preview box, and `Sign & append …? [y/N]` answered `n` prints `Aborted.` without creating a journal commit. Capturing stdout (`out=$(git shiplog write)`) must still prompt.
 
