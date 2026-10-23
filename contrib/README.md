@@ -68,7 +68,7 @@ exports an absolute `GIT_DIR` before running the verifier.
   from it, and pushes are matched by those prefixes. The client never tells the hook its root; without this the
   hook silently ignores journals under `refs/heads/_shiplog/**`.
 - `SHIPLOG_TRUST_REF` / `SHIPLOG_POLICY_REF` — override the derived refs. They must live under `SHIPLOG_REF_ROOT`
-  or the hook refuses to start; `SHIPLOG_ALLOW_MIXED_REF_ROOT=1` accepts a mixed layout deliberately (warning logged).
+  or the hook refuses to start; `SHIPLOG_ALLOW_MIXED_REF_ROOT=1` accepts a mixed layout deliberately (warning logged). Without it, the hook also refuses creates and updates under the other well-known root (`refs/_shiplog/**` vs `refs/heads/_shiplog/**`); deletions there are allowed for `refs migrate --remove-old`.
 - `SHIPLOG_REQUIRE_SIGNED_TRUST=1` — the trust commit itself must be signed by a current maintainer. Default `0`.
   `SHIPLOG_REQUIRE_SIGNED_TRUST_MODE` is ignored (a warning is printed); the quorum always applies.
 - `SHIPLOG_REQUIRE_SIGNED_POLICY` — default `1` when a trust ref exists, `0` otherwise.
