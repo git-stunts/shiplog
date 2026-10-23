@@ -239,3 +239,33 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | jq -r '.who.email')" = "bot@x" ]
 }
+
+@test "show, show --json and export-json read the trailer after the last sentinel" {
+  local ref="${REF_ROOT}/journal/prod"
+  run git shiplog --boring --yes write
+  [ "$status" -eq 0 ]
+  local parent tree json msg fixture
+  parent=$(git rev-parse "$ref")
+  tree=$(git rev-parse "${ref}^{tree}")
+  json=$(git shiplog show --json "$parent" | jq -c --arg p "$parent" '.seq = 1 | .journal_parent = $p')
+  msg=$(printf 'Deploy: web → prod\nReason: rollback\n---\nsee runbook\nStatus: SUCCESS\n\n---  # structured trailer for machines\n%s\n' "$json")
+  fixture=$(printf '%s\n' "$msg" | GIT_AUTHOR_NAME="Shiplog Tester" GIT_AUTHOR_EMAIL="shiplog-tester@example.com" \
+    GIT_COMMITTER_NAME="Shiplog Tester" GIT_COMMITTER_EMAIL="shiplog-tester@example.com" \
+    git commit-tree "$tree" -p "$parent")
+  git update-ref "$ref" "$fixture" "$parent"
+
+  run git shiplog show --json "$fixture"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.seq')" = "1" ]
+  run git shiplog show --json-compact "$fixture"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -r '.seq')" = "1" ]
+  run git shiplog export-json
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | jq -s 'map(select(.commit == "'"$fixture"'")) | length')" = "1" ]
+  [ "$(printf '%s\n' "$output" | jq -s -r 'map(select(.commit == "'"$fixture"'"))[0].seq')" = "1" ]
+  run git shiplog --boring show "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"see runbook"* ]]
+  [[ "$output" == *'"seq": 1'* ]]
+}

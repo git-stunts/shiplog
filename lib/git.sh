@@ -606,8 +606,8 @@ show_entry() {
   local body human json notes_ref
   notes_ref=$(shiplog_notes_git_ref)
   body="$(git show -s --format=%B "$target")"
-  human="$(awk '/^---/{exit} {print}' <<< "$body")"
-  json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+  human="$(shiplog_extract_header <<< "$body")"
+  json="$(shiplog_extract_trailer <<< "$body")"
 
   local bosun_bin=""
   local bosun_available=0

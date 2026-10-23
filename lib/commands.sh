@@ -1221,7 +1221,7 @@ EOF
   if [ "$json_only" -eq 1 ]; then
     local body json
     body="$(git show -s --format=%B "$target")"
-    json="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+    json="$(shiplog_extract_trailer <<< "$body")"
     if [ -z "$json" ]; then
       die "No JSON payload found in entry $target"
     fi
@@ -1368,7 +1368,7 @@ EOF
   while IFS= read -r c; do
     [ -n "$c" ] || continue
     body="$(git show -s --format=%B "$c" 2>/dev/null || true)"
-    trailer="$(awk '/^---/{flag=1;next}flag' <<< "$body")"
+    trailer="$(shiplog_extract_trailer <<< "$body")"
     line=""
     has_note=false
     if [ "$notes_present" -eq 1 ] && git notes --ref="$notes_ref" list "$c" >/dev/null 2>&1; then
