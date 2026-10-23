@@ -13,11 +13,11 @@ Ship it. Then prove you shipped it.
 ## Dry dock
 
 > [!IMPORTANT]
-> **Shiplog is in dry dock.** A full audit on 2026-10-21 found that the hull is sound and the locks are not: the storage layer (refs, trailers, compare-and-swap updates, fast-forward checks) passed review; the *enforcement* layer (trust quorum, signature verification, the pre-receive hook) has P0 defects and is being rebuilt behind an adversarial test suite.
+> **Shiplog is in dry dock.** A full audit on 2026-10-21 found that the hull was sound and the locks were not: the storage layer (refs, trailers, compare-and-swap updates, fast-forward checks) passed review; the *enforcement* layer (trust quorum, signature verification, the pre-receive hook) had P0 defects. The locks have since been rebuilt (roadmap G2 and G3): one shared trust verifier, prior-roster checks, a key-based N-of-M quorum, refused ref deletion and signed policy updates, proven by the adversarial suite `test/27_trust_adversarial.bats`, which now blocks CI. Still open: a few policy, ref-root and CLI issues, dogfooding (G9) and the 0.5.0 release (G10).
 >
-> **Use Shiplog today as a ledger.** Do not rely on it today as an access-control system.
+> **Use Shiplog today as a ledger.** Do not make it your only access-control system until it leaves dry dock.
 >
-> Plan: [`ROADMAP.md`](./ROADMAP.md) · live status: [tracking issue #155](https://github.com/git-stunts/shiplog/issues/155) · what's wrong, in detail: issues labeled [`audit-2026-10`](https://github.com/git-stunts/shiplog/issues?q=label%3Aaudit-2026-10). This section flips to "seaworthy" when `test/27_trust_adversarial.bats` is blocking and green. Not before.
+> Plan: [`ROADMAP.md`](./ROADMAP.md) · live status: [tracking issue #155](https://github.com/git-stunts/shiplog/issues/155) · what's wrong, in detail: issues labeled [`audit-2026-10`](https://github.com/git-stunts/shiplog/issues?q=label%3Aaudit-2026-10). This section flips to "seaworthy" with release 0.5.0 (G10): every `audit-2026-10` issue closed and `test/27_trust_adversarial.bats` blocking and green. Not before.
 
 ---
 
@@ -163,7 +163,7 @@ git shiplog trust show
 Entries are signed with the SSH key you already use for Git (`SHIPLOG_SIGN=1`). No new PKI, no new accounts, no signing service with a status page.
 
 > [!NOTE]
-> **What's being rebuilt (see [Dry dock](#dry-dock)):** the *server-side* verification of these rules. Today the hook can be bypassed by anyone with push access to the trust ref. After roadmap goal G3, trust changes are verified against the *previous* roster, the N-of-M quorum counts distinct maintainer keys via detached SSH attestations (the only quorum mode going forward), ref deletion is refused, and policy changes must be signed by a current maintainer. Details: [`docs/TRUST.md`](./docs/TRUST.md).
+> **Rebuilt in the audit (see [Dry dock](#dry-dock)):** the *server-side* verification of these rules. Trust changes are verified against the *previous* roster, the N-of-M quorum counts distinct, unrevoked maintainer keys, ref deletion is refused, and when a trust ref exists, policy changes must be signed by a current maintainer. Details: [`docs/TRUST.md`](./docs/TRUST.md).
 
 ---
 
@@ -230,7 +230,7 @@ Because you already back them up, replicate them, access-control them, and sign 
 Yes. It's `git` and `bash`. Push when you can.
 
 **Can an attacker rewrite history?**
-Journals are fast-forward-only and chained by `seq`/`journal_parent`, so a rewrite is detectable. Whether it's *prevented* depends on your host's enforcement, and that's exactly the layer in [dry dock](#dry-dock) right now. We are not going to tell you it's bulletproof until the adversarial suite says so.
+Journals are fast-forward-only and chained by `seq`/`journal_parent`, so a rewrite is detectable. Whether it's *prevented* depends on your host's enforcement: the pre-receive hook on self-hosted Git, rulesets and a required check on SaaS. That layer was rebuilt in the audit and the adversarial suite now runs blocking in CI, but we are not going to call it bulletproof until it leaves [dry dock](#dry-dock) with 0.5.0.
 
 **Does Shiplog use Shiplog?**
 Not yet, and yes, we heard you. Roadmap goal G9 makes this repo record its own CI runs and releases in its own ledger, on GitHub.com, under the branch namespace, with `verify` as a required check. A deploy ledger that doesn't log its own deploys would be a bit much.
